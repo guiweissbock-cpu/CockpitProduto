@@ -7,28 +7,29 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 :root{
-  --bg:#0F1512;
-  --panel:#161F1A;
-  --panel-2:#1C2621;
-  --line:rgba(233,241,231,0.10);
-  --ink:#E9F1E7;
-  --ink-dim:#9FB0A6;
-  --gold:#D8B25C;
-  --gold-soft:rgba(216,178,92,0.14);
-  --green:#6FBF8B;
-  --red:#D9695F;
-  --blue:#6FA3D8;
-  --purple:#B08CD9;
+  --bg:#0A1830;
+  --panel:#0F2140;
+  --panel-2:#13284C;
+  --line:rgba(226,236,255,0.10);
+  --ink:#F2F6FF;
+  --ink-dim:#9DB2D6;
+  --gold:#4C8DFF;
+  --gold-soft:rgba(76,141,255,0.16);
+  --green:#5FC7A6;
+  --red:#E0716A;
+  --blue:#4C8DFF;
+  --purple:#7FA9FF;
   --radius:14px;
 }
 @media (prefers-color-scheme: light){
   :root:not([data-theme="dark"]){
-    --bg:#F5F3EC; --panel:#FFFFFF; --panel-2:#F0EDE3; --line:rgba(20,30,24,0.10);
-    --ink:#161F1A; --ink-dim:#5B6A61;
+    --bg:#F4F8FF; --panel:#FFFFFF; --panel-2:#EAF1FF; --line:rgba(11,45,110,0.10);
+    --ink:#0B1E3D; --ink-dim:#5A7099; --gold:#1E5EFF; --gold-soft:rgba(30,94,255,0.10);
   }
 }
-:root[data-theme="dark"]{ --bg:#0F1512; --panel:#161F1A; --panel-2:#1C2621; --ink:#E9F1E7; --ink-dim:#9FB0A6; --line:rgba(233,241,231,0.10); }
-:root[data-theme="light"]{ --bg:#F5F3EC; --panel:#FFFFFF; --panel-2:#F0EDE3; --line:rgba(20,30,24,0.10); --ink:#161F1A; --ink-dim:#5B6A61; }
+:root[data-theme="dark"]{ --bg:#0A1830; --panel:#0F2140; --panel-2:#13284C; --ink:#F2F6FF; --ink-dim:#9DB2D6; --line:rgba(226,236,255,0.10); --gold:#4C8DFF; --gold-soft:rgba(76,141,255,0.16); }
+:root[data-theme="light"]{ --bg:#F4F8FF; --panel:#FFFFFF; --panel-2:#EAF1FF; --line:rgba(11,45,110,0.10); --ink:#0B1E3D; --ink-dim:#5A7099; --gold:#1E5EFF; --gold-soft:rgba(30,94,255,0.10); }
+
 
 *{box-sizing:border-box;}
 body{
@@ -259,9 +260,9 @@ document.querySelectorAll('.tab').forEach(t=>{
 function boot(){
 try{
 
-const COLORS = { vivo:'#D8B25C', gravado:'#6FA3D8', green:'#6FBF8B', red:'#D9695F', purple:'#B08CD9', dim:'#9FB0A6' };
+const COLORS = { vivo:'#1E5EFF', gravado:'#7FA9FF', green:'#5FC7A6', red:'#E0716A', purple:'#7FA9FF', dim:'#9DB2D6' };
 const GRUPOS = ["Pré-Vendas","Executivos","Gestão","Canais e Parcerias","Class","Programas Especiais","Sem Grupo Identificado"];
-const GRUPO_COLORS = { "Pré-Vendas":"#D8B25C","Executivos":"#6FA3D8","Gestão":"#6FBF8B","Canais e Parcerias":"#B08CD9","Class":"#D9695F","Programas Especiais":"#7FD1C1","Sem Grupo Identificado":"#5B6A61" };
+const GRUPO_COLORS = { "Pré-Vendas":"#1E5EFF","Executivos":"#5B8DEF","Gestão":"#3FA7D6","Canais e Parcerias":"#7FA9FF","Class":"#0B3D91","Programas Especiais":"#5FC7A6","Sem Grupo Identificado":"#8FA3C4" };
 
 function fmt(n){ return new Intl.NumberFormat('pt-BR').format(Math.round(n)); }
 function pct(n){ return (n>=0?'+':'') + n.toFixed(1) + '%'; }
@@ -437,7 +438,7 @@ document.getElementById('tabelaNotas').innerHTML = `
 
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
-  data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.gold||'#D8B25C'], borderWidth:0 }]},
+  data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.vivo], borderWidth:0 }]},
   options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
 });
 document.getElementById('kpi-dl-total').textContent = fmt(DATA.downloads_cross.total_downloads);
