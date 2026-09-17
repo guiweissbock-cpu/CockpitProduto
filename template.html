@@ -70,18 +70,20 @@ h1{font-family:Georgia,'Times New Roman',serif; font-size:clamp(28px,4vw,42px); 
 .chart-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px;}
 .chart-card h3{margin:0 0 4px; font-size:14px; font-weight:600;}
 .chart-card p.desc{margin:0 0 14px; font-size:12px; color:var(--ink-dim);}
-.chart-wrap{position:relative; height:280px; display:flex; align-items:center; justify-content:center;}
+.chart-wrap{position:relative; height:280px;}
+.chart-wrap.center-flex{display:flex; align-items:center; justify-content:center;}
 .chart-legend{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; margin-top:10px; font-size:12.5px; color:var(--ink-dim);}
 .chart-legend span{display:inline-flex; align-items:center; gap:6px;}
 .chart-legend i{width:9px; height:9px; border-radius:50%; display:inline-block;}
 .download-btn{background:var(--panel-2); border:1px solid var(--line); color:var(--gold); font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; white-space:nowrap;}
 .download-btn:hover{background:var(--gold-soft);}
 .chart-wrap.tall{height:340px;}
-.groups-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px;}
-.group-block{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px;}
+.groups-grid{display:flex; flex-direction:column; gap:16px;}
+.group-block{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 22px;}
+.group-block h4{font-size:16px;}
 .group-block h4{margin:0 0 10px; font-size:14px; font-weight:600;}
-.mini-line-label{font-size:11px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.03em; margin:10px 0 4px;}
-.mini-chart-wrap{position:relative; height:140px;}
+.mini-line-label{font-size:12px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.03em; margin:14px 0 6px; font-weight:600;}
+.mini-chart-wrap{position:relative; height:220px;}
 
 .toggle-group{display:inline-flex; background:var(--panel-2); border-radius:8px; padding:3px; margin-left:auto;}
 .toggle-btn{padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer; color:var(--ink-dim); font-weight:600;}
@@ -115,8 +117,7 @@ tr:last-child td{border-bottom:none;}
     <div>
       <div class="brand">PIPELOVERS · PRODUTO & CS</div>
       <h1>Painel de Engajamento & Saúde da Base</h1>
-      <div class="sub">Cruzamento de contas B2B, contratos, usuários, consumo (Waid), avaliações, downloads e sessões ao vivo (Zoom).</div>
-    </div>
+      </div>
     <div class="meta">Dados atualizados em<br><strong style="color:var(--ink); font-size:14px;">17 de setembro de 2026</strong></div>
   </div>
 
@@ -139,13 +140,13 @@ tr:last-child td{border-bottom:none;}
       <div class="chart-card">
         <h3>Contas Ativas vs. Inativas</h3>
         <p class="desc">Conta é considerada ativa quando há contrato sem data de churn.</p>
-        <div class="chart-wrap"><canvas id="chartContas"></canvas></div>
+        <div class="chart-wrap center-flex"><canvas id="chartContas"></canvas></div>
         <div class="chart-legend"><span><i style="background:var(--green)"></i>Ativas</span><span><i style="background:var(--red)"></i>Inativas</span></div>
       </div>
       <div class="chart-card">
         <h3>Usuários Ativos vs. Inativos</h3>
         <p class="desc">Usuário herda o status da conta a que pertence.</p>
-        <div class="chart-wrap"><canvas id="chartUsuarios"></canvas></div>
+        <div class="chart-wrap center-flex"><canvas id="chartUsuarios"></canvas></div>
         <div class="chart-legend"><span><i style="background:var(--green)"></i>Ativos</span><span><i style="background:var(--red)"></i>Inativos</span></div>
       </div>
     </div>
@@ -236,7 +237,7 @@ tr:last-child td{border-bottom:none;}
     <div class="section-title">Downloads (Offline) x Consumo Registrado</div>
     <div class="row2">
       <div class="chart-card">
-        <div class="chart-wrap"><canvas id="chartDownloads"></canvas></div>
+        <div class="chart-wrap center-flex"><canvas id="chartDownloads"></canvas></div>
         <div class="chart-legend"><span><i style="background:var(--green)"></i>Assistiu</span><span><i style="background:var(--gold)"></i>Sem registro</span></div>
       </div>
       <div class="card">
@@ -288,7 +289,7 @@ try{
 
 const COLORS = { vivo:'#1E5EFF', gravado:'#7FA9FF', green:'#5FC7A6', red:'#E0716A', purple:'#7FA9FF', dim:'#9DB2D6' };
 const GRUPOS = ["Pré-Vendas","Executivos","Gestão","Canais e Parcerias","Class","Programas Especiais","Sem Grupo Identificado"];
-const GRUPO_COLORS = { "Pré-Vendas":"#1E5EFF","Executivos":"#5B8DEF","Gestão":"#3FA7D6","Canais e Parcerias":"#7FA9FF","Class":"#0B3D91","Programas Especiais":"#5FC7A6","Sem Grupo Identificado":"#8FA3C4" };
+const GRUPO_COLORS = { "Pré-Vendas":"#1D4ED8","Executivos":"#4F46E5","Gestão":"#0891B2","Canais e Parcerias":"#0369A1","Class":"#1E3A8A","Programas Especiais":"#059669","Sem Grupo Identificado":"#64748B" };
 
 function fmt(n){ return new Intl.NumberFormat('pt-BR').format(Math.round(n)); }
 function pct(n){ return (n>=0?'+':'') + n.toFixed(1) + '%'; }
@@ -326,12 +327,12 @@ document.getElementById('kpi-overview').innerHTML = `
 mkChart(document.getElementById('chartContas'), {
   type:'doughnut',
   data:{ labels:['Ativas','Inativas'], datasets:[{ data:[DATA.contas.ativas, DATA.contas.inativas], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12, lineHeight:1.3}, textAlign:'center', formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return [fmt(v), '('+(v/total*100).toFixed(0)+'%)'];}}}, cutout:'58%', layout:{padding:8} }
 });
 mkChart(document.getElementById('chartUsuarios'), {
   type:'doughnut',
   data:{ labels:['Ativos','Inativos'], datasets:[{ data:[DATA.usuarios.ativos, DATA.usuarios.inativos], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12, lineHeight:1.3}, textAlign:'center', formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return [fmt(v), '('+(v/total*100).toFixed(0)+'%)'];}}}, cutout:'58%', layout:{padding:8} }
 });
 
 // MAU overview - last 12 closed months (exclude partial current month)
@@ -339,7 +340,7 @@ const mauClosed = DATA.mau_mes.filter(x=>x.mes !== DATA.meta.mes_parcial).slice(
 mkChart(document.getElementById('chartMauOverview'), {
   type:'line',
   data:{ labels:mauClosed.map(x=>x.mes), datasets:[{ label:'MAU', data:mauClosed.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.15)', fill:true, tension:0.3 }]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, align:'top', color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}} } }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, align:'top', color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}} } }
 });
 
 // ----- Outros indicadores: TTFV, Lead time de churn -----
@@ -375,15 +376,15 @@ function renderGroupDualLine(canvasId, periodos, aulas, usuariosUnicos, cor){
   return mkChart(c, {
     type:'line',
     data:{ labels:periodos, datasets:[
-      { label:'Aulas assistidas', data:aulas, borderColor:cor, backgroundColor:cor+'22', fill:true, tension:0.3, pointRadius:2, yAxisID:'y' },
-      { label:'Usuários únicos', data:usuariosUnicos, borderColor:COLORS.purple, backgroundColor:'transparent', borderDash:[4,3], tension:0.3, pointRadius:2, yAxisID:'y1' },
+      { label:'Aulas assistidas', data:aulas, borderColor:cor, backgroundColor:cor+'22', fill:true, tension:0.3, pointRadius:3, borderWidth:2, yAxisID:'y' },
+      { label:'Usuários únicos', data:usuariosUnicos, borderColor:COLORS.purple, backgroundColor:'transparent', borderDash:[4,3], borderWidth:2, tension:0.3, pointRadius:3, yAxisID:'y1' },
     ] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', font:{size:9, weight:'600'}, color:ctx=>ctx.datasetIndex===0?cor:COLORS.purple, formatter:v=>v>0?fmt(v):''} },
+    options:{ responsive:true, maintainAspectRatio:false, layout:{padding:{top:22}},
+      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', offset:4, font:{size:11, weight:'600'}, color:ctx=>ctx.datasetIndex===0?cor:COLORS.purple, formatter:v=>v>0?fmt(v):''} },
       scales:{
-        x:{grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:6}},
-        y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{font:{size:9}}},
-        y1:{beginAtZero:true, position:'right', grid:{display:false}, ticks:{font:{size:9}}},
+        x:{grid:{display:false}, ticks:{font:{size:11}, maxRotation:0, autoSkip:true, maxTicksLimit:8}},
+        y:{beginAtZero:true, grid:{color:'rgba(0,0,0,0.05)'}, ticks:{font:{size:10}}},
+        y1:{beginAtZero:true, position:'right', grid:{display:false}, ticks:{font:{size:10}}},
       } }
   });
 }
@@ -430,7 +431,7 @@ document.getElementById('kpi-usuarios').innerHTML = `
 mkChart(document.getElementById('chartMauFull'), {
   type:'line',
   data:{ labels:DATA.mau_mes.filter(x=>x.mes!==DATA.meta.mes_parcial).map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.filter(x=>x.mes!==DATA.meta.mes_parcial).map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
 });
 
 const volMes = DATA.mau_mes.map(m=>m.mes);
@@ -439,7 +440,7 @@ const volMesesOrdenados = Object.keys(volTotals).sort().slice(-18); // últimos 
 mkChart(document.getElementById('chartVolume'), {
   type:'bar',
   data:{ labels:volMesesOrdenados, datasets:[{label:'Aulas concluídas', data:volMesesOrdenados.map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, anchor:'end', align:'top', font:{size:10, weight:'600'}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, layout:{padding:{top:20}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxRotation:45, minRotation:45}} } }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, anchor:'end', align:'top', font:{size:10, weight:'600'}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, layout:{padding:{top:20}}, scales:{ y:{grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}, ticks:{maxRotation:45, minRotation:45}} } }
 });
 
 // ================= DORMENTES =================
@@ -481,7 +482,7 @@ if (!window.__downloadListenersBound){
 mkChart(document.getElementById('chartNotas'), {
   type:'bar',
   data:{ labels:DATA.nota_grupo.map(x=>x.grupo), datasets:[{ label:'Nota média', data:DATA.nota_grupo.map(x=>x.nota_media), backgroundColor:DATA.nota_grupo.map(x=>GRUPO_COLORS[x.grupo]||COLORS.dim) }]},
-  options:{ indexAxis:'y', plugins:{legend:{display:false}, datalabels:{display:true, align:'end', anchor:'end', font:{size:10, weight:'600'}, color:'var(--ink)', formatter:v=>v.toFixed(2)}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(255,255,255,0.05)'}}, y:{grid:{display:false}} } }
+  options:{ indexAxis:'y', layout:{padding:{right:30}}, plugins:{legend:{display:false}, datalabels:{display:true, align:'right', anchor:'end', clamp:true, clip:false, font:{size:11, weight:'700'}, color:'var(--ink)', formatter:v=>v.toFixed(2)}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(11,45,110,0.06)'}}, y:{grid:{display:false}} } }
 });
 document.getElementById('tabelaNotas').innerHTML = `
   <tr><th>Grupo</th><th>Nota média</th><th>Avaliações</th></tr>
@@ -491,7 +492,7 @@ document.getElementById('tabelaNotas').innerHTML = `
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
   data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.vivo], borderWidth:0 }]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12, lineHeight:1.3}, textAlign:'center', formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return [fmt(v), '('+(v/total*100).toFixed(0)+'%)'];}}}, cutout:'58%', layout:{padding:8} }
 });
 document.getElementById('kpi-dl-total').textContent = fmt(DATA.downloads_cross.total_downloads);
 
