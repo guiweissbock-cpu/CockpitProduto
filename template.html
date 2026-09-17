@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PipeLovers — Painel de Produto & CS</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
 :root{
   --bg:#0A1830;
@@ -79,6 +80,11 @@ h1{font-family:Georgia,'Times New Roman',serif; font-size:clamp(28px,4vw,42px); 
 .chart-card p.desc{margin:0 0 14px; font-size:12px; color:var(--ink-dim);}
 .chart-wrap{position:relative; height:280px;}
 .chart-wrap.tall{height:340px;}
+.groups-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px;}
+.group-block{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px;}
+.group-block h4{margin:0 0 10px; font-size:14px; font-weight:600;}
+.mini-line-label{font-size:11px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.03em; margin:10px 0 4px;}
+.mini-chart-wrap{position:relative; height:110px;}
 
 .toggle-group{display:inline-flex; background:var(--panel-2); border-radius:8px; padding:3px; margin-left:auto;}
 .toggle-btn{padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer; color:var(--ink-dim); font-weight:600;}
@@ -121,9 +127,10 @@ tr:last-child td{border-bottom:none;}
     <div class="tab active" data-panel="visao-geral">Visão Geral</div>
     <div class="tab" data-panel="consumo">Consumo por Grupo</div>
     <div class="tab" data-panel="usuarios">Usuários & MAU</div>
+    <div class="tab" data-panel="dormentes">Usuários Dormentes</div>
     <div class="tab" data-panel="qualidade">Notas & Downloads</div>
     <div class="tab" data-panel="contas">Contas & Empresas</div>
-    <div class="tab" data-panel="metricas">Métricas Sugeridas</div>
+    <div class="tab" data-panel="semgrupo">Sem Grupo Identificado</div>
   </div>
 
   <!-- ================= VISÃO GERAL ================= -->
@@ -148,6 +155,16 @@ tr:last-child td{border-bottom:none;}
     <div class="chart-card">
       <div class="chart-wrap tall"><canvas id="chartMauOverview"></canvas></div>
     </div>
+
+    <div class="section-title">Outros indicadores de saúde</div>
+    <div class="grid" id="kpi-extra"></div>
+
+    <div class="section-title">Retenção por Coorte de Ativação <span class="n">% de usuários do coorte que voltaram a consumir M+1, M+2, M+3</span></div>
+    <div class="chart-card">
+      <div class="table-wrap">
+        <table id="tabelaCohort"></table>
+      </div>
+    </div>
   </div>
 
   <!-- ================= CONSUMO ================= -->
@@ -159,20 +176,16 @@ tr:last-child td{border-bottom:none;}
         <div class="toggle-btn" data-val="semana">Semanal</div>
       </div>
     </div>
-    <div class="chart-card">
-      <div class="chart-wrap tall"><canvas id="chartConsumoGrupo"></canvas></div>
-    </div>
+    <div id="consumoGrupoContainer"></div>
 
-    <div class="card-head" style="margin-top:32px;">
+    <div class="card-head" style="margin-top:36px;">
       <div class="section-title" style="margin-top:0;">Usuários Únicos por Grupo — Ao Vivo vs. Gravado</div>
       <div class="toggle-group" data-target="users-periodo">
         <div class="toggle-btn active" data-val="mes">Mensal</div>
         <div class="toggle-btn" data-val="semana">Semanal</div>
       </div>
     </div>
-    <div class="chart-card">
-      <div class="chart-wrap tall"><canvas id="chartUsersGrupo"></canvas></div>
-    </div>
+    <div id="usersGrupoContainer"></div>
   </div>
 
   <!-- ================= USUÁRIOS & MAU ================= -->
@@ -188,9 +201,21 @@ tr:last-child td{border-bottom:none;}
     <div class="chart-card">
       <div class="chart-wrap tall"><canvas id="chartVolume"></canvas></div>
     </div>
+  </div>
 
-    <div class="section-title">Usuários Dormentes</div>
+  <!-- ================= DORMENTES ================= -->
+  <div class="panel" id="dormentes">
+    <div class="callout" style="margin-top:0;">Considera apenas usuários de <b>contas ativas hoje</b> — a ideia é dar uma lista acionável pro CS, não histórico de contas já perdidas.</div>
     <div class="grid" id="kpi-dormentes"></div>
+
+    <div class="section-title" style="margin-top:0;">Nunca consumiram nenhuma aula</div>
+    <div class="table-wrap chart-card"><table id="tabelaDormNunca"></table></div>
+
+    <div class="section-title">Sem consumo há mais de 6 meses</div>
+    <div class="table-wrap chart-card"><table id="tabelaDorm6m"></table></div>
+
+    <div class="section-title">Sem consumo há mais de 3 meses</div>
+    <div class="table-wrap chart-card"><table id="tabelaDorm3m"></table></div>
   </div>
 
   <!-- ================= QUALIDADE ================= -->
@@ -223,19 +248,19 @@ tr:last-child td{border-bottom:none;}
 
   <!-- ================= CONTAS ================= -->
   <div class="panel" id="contas">
-    <div class="section-title" style="margin-top:0;">Empresas com +50% de MAU <span class="n">(% de usuários da conta ativos no último mês fechado — Ago/2026, contas com 3+ usuários)</span></div>
+    <div class="section-title" style="margin-top:0;">Empresas Ativas <span class="n">todos os clientes com contrato ativo hoje, ordenado por % de MAU (usuários ativos no último mês fechado — Ago/2026)</span></div>
     <div class="table-wrap chart-card">
       <table id="tabelaEmpresas"></table>
     </div>
   </div>
 
-  <!-- ================= MÉTRICAS SUGERIDAS ================= -->
-  <div class="panel" id="metricas">
-    <div class="section-title" style="margin-top:0;">Outras métricas que recomendo acompanhar</div>
-    <div id="metricas-sugeridas"></div>
-
-    <div class="section-title">Perguntas para fechar os gaps de dados</div>
-    <div id="perguntas"></div>
+  <!-- ================= SEM GRUPO ================= -->
+  <div class="panel" id="semgrupo">
+    <div class="callout" style="margin-top:0;" id="callout-semgrupo"></div>
+    <div class="section-title" style="margin-top:0;">Aulas que não bateram com a Biblioteca PAI</div>
+    <div class="table-wrap chart-card">
+      <table id="tabelaSemGrupo"></table>
+    </div>
   </div>
 
   <div class="footer-note">
@@ -273,6 +298,10 @@ function mkChart(ctx, config){
 
 function chartDefaults(){
   if (typeof Chart === 'undefined') return;
+  if (typeof ChartDataLabels !== 'undefined'){
+    Chart.register(ChartDataLabels);
+    Chart.defaults.set('plugins.datalabels', { display:false });
+  }
   Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--ink-dim').trim() || '#9FB0A6';
   Chart.defaults.font.family = "Inter, sans-serif";
   Chart.defaults.font.size = 11.5;
@@ -296,83 +325,87 @@ document.getElementById('kpi-overview').innerHTML = `
 mkChart(document.getElementById('chartContas'), {
   type:'doughnut',
   data:{ labels:['Ativas','Inativas'], datasets:[{ data:[DATA.contas.ativas, DATA.contas.inativas], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
+  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
 });
 mkChart(document.getElementById('chartUsuarios'), {
   type:'doughnut',
   data:{ labels:['Ativos','Inativos'], datasets:[{ data:[DATA.usuarios.ativos, DATA.usuarios.inativos], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
+  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
 });
 
 // MAU overview - last 12 closed months (exclude partial current month)
 const mauClosed = DATA.mau_mes.filter(x=>x.mes !== DATA.meta.mes_parcial).slice(-12);
 mkChart(document.getElementById('chartMauOverview'), {
   type:'line',
-  data:{ labels:mauClosed.map(x=>x.mes), datasets:[{ label:'MAU', data:mauClosed.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(216,178,92,0.15)', fill:true, tension:0.3 }]},
-  options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}} } }
+  data:{ labels:mauClosed.map(x=>x.mes), datasets:[{ label:'MAU', data:mauClosed.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.15)', fill:true, tension:0.3 }]},
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, align:'top', color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}} } }
 });
 
-// ================= CONSUMO POR GRUPO =================
-function buildStackedByGroup(canvasId, dataset, periodoField){
-  const periodos = [...new Set(dataset.map(d=>d[periodoField]))].sort();
-  const datasets = [];
-  GRUPOS.forEach(g=>{
-    ['Ao Vivo','Gravado'].forEach(tipo=>{
-      const vals = periodos.map(p=>{
-        const rec = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo===tipo);
-        return rec ? (rec.aulas_assistidas ?? rec.usuarios_unicos) : 0;
-      });
-      datasets.push({
-        label: `${g} · ${tipo}`,
-        data: vals,
-        backgroundColor: GRUPO_COLORS[g],
-        stack: tipo,
-        borderWidth: tipo==='Ao Vivo'? 0 : 0,
-        borderColor: tipo==='Ao Vivo' ? '#00000000' : GRUPO_COLORS[g],
-      });
-    });
-  });
-  return {periodos, datasets};
+// ----- Outros indicadores: TTFV, Lead time de churn -----
+document.getElementById('kpi-extra').innerHTML = `
+  <div class="card"><div class="kpi-label">Time-to-First-Value (TTFV)</div><div class="kpi-value gold">${DATA.ttfv.mediana_dias!=null ? DATA.ttfv.mediana_dias.toFixed(0)+' dias' : '—'}</div><div class="kpi-sub">Mediana entre criação do usuário e 1ª aula concluída (média: ${DATA.ttfv.media_dias!=null?DATA.ttfv.media_dias.toFixed(1):'—'} dias, n=${fmt(DATA.ttfv.amostra)})</div></div>
+  <div class="card"><div class="kpi-label">Lead time até o Churn</div><div class="kpi-value" style="color:var(--red)">${DATA.lead_time_churn.mediana_dias!=null ? DATA.lead_time_churn.mediana_dias.toFixed(0)+' dias' : '—'}</div><div class="kpi-sub">Mediana entre a última aula consumida e a data de churn (média: ${DATA.lead_time_churn.media_dias!=null?DATA.lead_time_churn.media_dias.toFixed(1):'—'} dias, n=${fmt(DATA.lead_time_churn.amostra)})</div></div>
+`;
+
+document.getElementById('tabelaCohort').innerHTML = `
+  <tr><th>Coorte (mês de ativação)</th><th>Tamanho</th><th>M+0</th><th>M+1</th><th>M+2</th><th>M+3</th></tr>
+  ${DATA.cohort_retencao.map(r=>`<tr><td>${r.cohort}</td><td>${fmt(r.tamanho)}</td><td>${r.m0!=null?r.m0.toFixed(0)+'%':'—'}</td><td>${r.m1!=null?r.m1.toFixed(0)+'%':'—'}</td><td>${r.m2!=null?r.m2.toFixed(0)+'%':'—'}</td><td>${r.m3!=null?r.m3.toFixed(0)+'%':'—'}</td></tr>`).join('')}
+`;
+
+// ================= CONSUMO POR GRUPO (mini-gráficos de linha) =================
+let groupCharts = []; // guarda instâncias pra destruir ao trocar de período
+
+function buildGroupContainer(containerId, valueKey){
+  const el = document.getElementById(containerId);
+  el.innerHTML = `<div class="groups-grid">` + GRUPOS.map(g => `
+    <div class="group-block">
+      <h4>${g}</h4>
+      <div class="mini-line-label">Ao Vivo</div>
+      <div class="mini-chart-wrap"><canvas id="${containerId}-${valueKey}-vivo-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
+      <div class="mini-line-label">Gravado</div>
+      <div class="mini-chart-wrap"><canvas id="${containerId}-${valueKey}-grav-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
+    </div>
+  `).join('') + `</div>`;
 }
 
-let chartConsumoGrupo, chartUsersGrupo;
-function renderConsumoGrupo(periodoField){
-  const dataset = periodoField==='mes' ? DATA.consumo_mes : DATA.consumo_semana;
-  const slice = periodoField==='mes' ? dataset.filter(d=>true) : dataset;
-  const periodos = [...new Set(slice.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
-  const datasets = [];
-  GRUPOS.forEach(g=>{
-    const vivo = periodos.map(p=>{ const r = slice.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Ao Vivo'); return r? r.aulas_assistidas:0; });
-    const grav = periodos.map(p=>{ const r = slice.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Gravado'); return r? r.aulas_assistidas:0; });
-    datasets.push({label:g+' (Ao Vivo)', data:vivo, backgroundColor:GRUPO_COLORS[g], stack:'stack1'});
-    datasets.push({label:g+' (Gravado)', data:grav, backgroundColor:GRUPO_COLORS[g]+'88', stack:'stack1'});
-  });
-  if(chartConsumoGrupo) chartConsumoGrupo.destroy();
-  chartConsumoGrupo = mkChart(document.getElementById('chartConsumoGrupo'), {
-    type:'bar',
-    data:{ labels:periodos, datasets },
+function renderGroupLine(canvasId, periodos, valores, cor){
+  const c = document.getElementById(canvasId);
+  if (!c) return null;
+  return mkChart(c, {
+    type:'line',
+    data:{ labels:periodos, datasets:[{ data:valores, borderColor:cor, backgroundColor:cor+'22', fill:true, tension:0.3, pointRadius:2 }] },
     options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ position:'bottom', labels:{boxWidth:10, font:{size:10}} } },
-      scales:{ x:{stacked:true, grid:{display:false}}, y:{stacked:true, grid:{color:'rgba(255,255,255,0.05)'}} } }
+      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', font:{size:9, weight:'600'}, color:'var(--ink-dim)', formatter:v=>v>0?fmt(v):''} },
+      scales:{ x:{grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:6}}, y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{font:{size:9}}} } }
   });
 }
+
+function renderConsumoGrupo(periodoField){
+  groupCharts.forEach(c=>c && c.destroy()); groupCharts = [];
+  const dataset = periodoField==='mes' ? DATA.consumo_mes : DATA.consumo_semana;
+  const periodos = [...new Set(dataset.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
+  buildGroupContainer('consumoGrupoContainer','consumo');
+  GRUPOS.forEach(g=>{
+    const slug = g.replace(/[^a-zA-Z0-9]/g,'');
+    const vivo = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Ao Vivo'); return r? r.aulas_assistidas:0; });
+    const grav = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Gravado'); return r? r.aulas_assistidas:0; });
+    groupCharts.push(renderGroupLine(`consumoGrupoContainer-consumo-vivo-${slug}`, periodos, vivo, GRUPO_COLORS[g]));
+    groupCharts.push(renderGroupLine(`consumoGrupoContainer-consumo-grav-${slug}`, periodos, grav, GRUPO_COLORS[g]));
+  });
+}
+
+let userGroupCharts = [];
 function renderUsersGrupo(periodoField){
+  userGroupCharts.forEach(c=>c && c.destroy()); userGroupCharts = [];
   const dataset = periodoField==='mes' ? DATA.users_mes : DATA.users_semana;
   const periodos = [...new Set(dataset.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
-  const datasets = [];
+  buildGroupContainer('usersGrupoContainer','users');
   GRUPOS.forEach(g=>{
+    const slug = g.replace(/[^a-zA-Z0-9]/g,'');
     const vivo = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Ao Vivo'); return r? r.usuarios_unicos:0; });
     const grav = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Gravado'); return r? r.usuarios_unicos:0; });
-    datasets.push({label:g+' (Ao Vivo)', data:vivo, backgroundColor:GRUPO_COLORS[g], stack:'stack1'});
-    datasets.push({label:g+' (Gravado)', data:grav, backgroundColor:GRUPO_COLORS[g]+'88', stack:'stack1'});
-  });
-  if(chartUsersGrupo) chartUsersGrupo.destroy();
-  chartUsersGrupo = mkChart(document.getElementById('chartUsersGrupo'), {
-    type:'bar',
-    data:{ labels:periodos, datasets },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{ position:'bottom', labels:{boxWidth:10, font:{size:10}} } },
-      scales:{ x:{stacked:true, grid:{display:false}}, y:{stacked:true, grid:{color:'rgba(255,255,255,0.05)'}} } }
+    userGroupCharts.push(renderGroupLine(`usersGrupoContainer-users-vivo-${slug}`, periodos, vivo, GRUPO_COLORS[g]));
+    userGroupCharts.push(renderGroupLine(`usersGrupoContainer-users-grav-${slug}`, periodos, grav, GRUPO_COLORS[g]));
   });
 }
 renderConsumoGrupo('mes');
@@ -400,15 +433,15 @@ const prevMau = mauClosed[mauClosed.length-2];
 const mauTrend = lastMau && prevMau ? ((lastMau.mau - prevMau.mau)/prevMau.mau*100) : 0;
 
 document.getElementById('kpi-usuarios').innerHTML = `
-  <div class="card"><div class="kpi-label">MAU (último mês fechado — ${lastMau.mes})</div><div class="kpi-value gold">${fmt(lastMau.mau)}</div><div class="kpi-sub">${mauTrend>=0?'▲':'▼'} ${pct(mauTrend)} vs. mês anterior</div></div>
+  <div class="card"><div class="kpi-label">MAU (último mês fechado — ${lastMau.mes})</div><div class="kpi-value gold">${fmt(lastMau.mau)}</div><div class="kpi-sub">${mauTrend>=0?'▲':'▼'} ${pct(mauTrend)} vs. mês anterior · ${lastMau.mau_pct_da_base_ativa!=null?lastMau.mau_pct_da_base_ativa.toFixed(1):'—'}% dos usuários ativos</div></div>
   <div class="card"><div class="kpi-label">Volume médio de aulas concluídas / mês</div><div class="kpi-value">${fmt(DATA.volume_medio.media_aulas_por_mes)}</div><div class="kpi-sub">Média histórica (todos os meses)</div></div>
   <div class="card"><div class="kpi-label">Aulas concluídas / usuário ativo / mês</div><div class="kpi-value">${DATA.volume_medio.media_aulas_por_usuario_mes.toFixed(1)}</div><div class="kpi-sub">Média histórica</div></div>
 `;
 
 mkChart(document.getElementById('chartMauFull'), {
   type:'line',
-  data:{ labels:DATA.mau_mes.map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(216,178,92,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
-  options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
+  data:{ labels:DATA.mau_mes.map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
+  options:{ plugins:{legend:{display:false}, datalabels:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
 });
 
 const volMes = DATA.mau_mes.map(m=>m.mes);
@@ -416,20 +449,30 @@ const volTotals = DATA.consumo_mes.reduce((acc,d)=>{ acc[d.mes]=(acc[d.mes]||0)+
 mkChart(document.getElementById('chartVolume'), {
   type:'bar',
   data:{ labels:Object.keys(volTotals).sort(), datasets:[{label:'Aulas concluídas', data:Object.keys(volTotals).sort().map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
-  options:{ plugins:{legend:{display:false}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, anchor:'end', align:'top', font:{size:9}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
 });
 
+// ================= DORMENTES =================
 document.getElementById('kpi-dormentes').innerHTML = `
-  <div class="card"><div class="kpi-label">Nunca consumiram nenhuma aula</div><div class="kpi-value red">${fmt(DATA.dormentes.nunca_consumiram)}</div><div class="kpi-sub">${(DATA.dormentes.nunca_consumiram/DATA.dormentes.total_usuarios*100).toFixed(1)}% da base de usuários</div></div>
+  <div class="card"><div class="kpi-label">Nunca consumiram nenhuma aula</div><div class="kpi-value red">${fmt(DATA.dormentes.nunca_consumiram)}</div><div class="kpi-sub">${(DATA.dormentes.nunca_consumiram/DATA.dormentes.total_usuarios_ativos*100).toFixed(1)}% dos usuários ativos hoje</div></div>
   <div class="card"><div class="kpi-label">Sem consumo há mais de 6 meses</div><div class="kpi-value red">${fmt(DATA.dormentes.sem_consumo_6m)}</div><div class="kpi-sub">Entre os que já consumiram alguma vez</div></div>
   <div class="card"><div class="kpi-label">Sem consumo há mais de 3 meses</div><div class="kpi-value" style="color:var(--gold)">${fmt(DATA.dormentes.sem_consumo_3m)}</div><div class="kpi-sub">Entre os que já consumiram alguma vez</div></div>
 `;
+function renderDormTable(elId, lista){
+  document.getElementById(elId).innerHTML = `
+    <tr><th>Usuário</th><th>E-mail</th><th>Empresa</th><th>CSM</th><th>Dias sem consumo</th></tr>
+    ${lista.map(r=>`<tr><td>${r.nome_usuario||'—'}</td><td>${r.email}</td><td>${r.nome_conta||'—'}</td><td>${r.csm||'—'}</td><td>${r.dias_desde_ultimo!=null?fmt(r.dias_desde_ultimo):'nunca consumiu'}</td></tr>`).join('')}
+  `;
+}
+renderDormTable('tabelaDormNunca', DATA.dormentes_listas.nunca);
+renderDormTable('tabelaDorm6m', DATA.dormentes_listas.seis_meses);
+renderDormTable('tabelaDorm3m', DATA.dormentes_listas.tres_meses);
 
 // ================= QUALIDADE =================
 mkChart(document.getElementById('chartNotas'), {
   type:'bar',
   data:{ labels:DATA.nota_grupo.map(x=>x.grupo), datasets:[{ label:'Nota média', data:DATA.nota_grupo.map(x=>x.nota_media), backgroundColor:DATA.nota_grupo.map(x=>GRUPO_COLORS[x.grupo]||COLORS.dim) }]},
-  options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(255,255,255,0.05)'}}, y:{grid:{display:false}} } }
+  options:{ indexAxis:'y', plugins:{legend:{display:false}, datalabels:{display:true, align:'end', anchor:'end', font:{size:10, weight:'600'}, color:'var(--ink)', formatter:v=>v.toFixed(2)}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(255,255,255,0.05)'}}, y:{grid:{display:false}} } }
 });
 document.getElementById('tabelaNotas').innerHTML = `
   <tr><th>Grupo</th><th>Nota média</th><th>Avaliações</th></tr>
@@ -439,40 +482,22 @@ document.getElementById('tabelaNotas').innerHTML = `
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
   data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.vivo], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
+  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
 });
 document.getElementById('kpi-dl-total').textContent = fmt(DATA.downloads_cross.total_downloads);
 
-// ================= CONTAS =================
+// ================= CONTAS (empresas ativas) =================
 document.getElementById('tabelaEmpresas').innerHTML = `
-  <tr><th>Empresa</th><th>Usuários</th><th>Ativos no mês</th><th>% MAU</th><th>Status Conta</th></tr>
-  ${DATA.empresas_mau50.map(r=>`<tr><td>${r.nome_conta}</td><td>${r.total_usuarios}</td><td>${r.usuarios_ativos_mes}</td><td><b>${r.mau_pct.toFixed(1)}%</b></td><td><span class="pill ${r.status_conta==='Ativa'?'ok':'bad'}">${r.status_conta}</span></td></tr>`).join('')}
+  <tr><th>Empresa</th><th>CSM</th><th>Usuários</th><th>Ativos no mês</th><th>% MAU</th></tr>
+  ${DATA.empresas_ativas.map(r=>`<tr><td>${r.nome_conta}</td><td>${r.csm}</td><td>${r.total_usuarios}</td><td>${r.usuarios_ativos_mes}</td><td><b>${r.mau_pct.toFixed(1)}%</b></td></tr>`).join('')}
 `;
 
-// ================= MÉTRICAS SUGERIDAS =================
-const sugestoes = [
-  ["Taxa de conclusão de trilhas/programas", "Não de aulas soltas, mas % de usuários que concluem uma trilha inteira (ex: Certificação de Vendedores B2B) do início ao fim. Mostra profundidade, não só volume."],
-  ["Time-to-first-value (TTFV)", "Tempo entre a criação do usuário e a primeira aula concluída. Ajuda a identificar onboarding travado."],
-  ["Retenção por coorte (cohort de ativação)", "Usuários que começaram em um mês X, quantos ainda estão ativos 30/60/90 dias depois — mede se o engajamento inicial se sustenta."],
-  ["NPS / CSAT por conta", "Hoje temos nota de aula; falta satisfação com a plataforma/CS como um todo, por conta."],
-  ["Health Score por conta (composto)", "Combinar MAU%, nota média, uso de sessões ao vivo, tickets de suporte e status de contrato num score único para priorizar CS."],
-  ["Expansão vs. contração de contrato", "Contas que fizeram upgrade de plano (ex: PipeLovers 3 → 5) vs. downgrade, como leading indicator de churn."],
-  ["Lead time entre fim do consumo e churn", "Quantos dias/meses antes do churn a conta já estava com consumo caindo — vira alerta preditivo."],
-  ["Engajamento por cargo (SDR, Closer, CEO, etc.)", "O campo 'cargo' está preenchido em ~40% da base; se completarmos, dá pra ver se a trilha certa está engajando o papel certo."],
-];
-document.getElementById('metricas-sugeridas').innerHTML = `<div class="row2">` + sugestoes.map(s=>`
-  <div class="card"><div style="font-weight:600; margin-bottom:6px;">${s[0]}</div><div style="font-size:13px; color:var(--ink-dim);">${s[1]}</div></div>
-`).join('') + `</div>`;
-
-const perguntas = [
-  "Existe log de login separado do consumo de aula (ex: último acesso à plataforma)? Hoje 'dormência' está sendo medida por último consumo, não por login — se houver um evento de login, dá pra refinar.",
-  "Dá pra puxar tickets/atendimentos de suporte (Zendesk, Intercom, etc.) para cruzar volume de chamados com queda de consumo?",
-  "O campo 'status' de usuários (Ativo/Inativo na tabela usuarios) tem uma regra de negócio própria, diferente do status da conta? Hoje 89% dele está vazio — vale entender o que preenche esse campo.",
-  "Existe data de assinatura de contrato consistente o suficiente pra montar cohort de ativação por data de assinatura (não só por data de criação de usuário)?",
-  "Dá pra padronizar os títulos das aulas entre Waid e a planilha PAI? Hoje 34% do consumo caiu em 'Sem Grupo Identificado' por divergência de nomenclatura.",
-  "Tem NPS ou pesquisa de satisfação centralizada em algum lugar (Typeform, Zendesk, etc.)?",
-];
-document.getElementById('perguntas').innerHTML = `<div class="card"><ul style="margin:0; padding-left:18px; font-size:13.5px; line-height:1.8;">` + perguntas.map(p=>`<li>${p}</li>`).join('') + `</ul></div>`;
+// ================= SEM GRUPO IDENTIFICADO =================
+document.getElementById('callout-semgrupo').innerHTML = `<b>${DATA.meta.aviso_grupo}</b> A lista abaixo mostra o título exato como veio do export do Waid — se algum bater com um título diferente na Biblioteca PAI, é só ajustar um dos dois lados para ficarem idênticos.`;
+document.getElementById('tabelaSemGrupo').innerHTML = `
+  <tr><th>Nome da aula (como veio do Waid)</th><th>Ocorrências no consumo</th></tr>
+  ${DATA.sem_grupo_tabela.map(r=>`<tr><td>${r['Nome da aula']}</td><td>${fmt(r.ocorrencias)}</td></tr>`).join('')}
+`;
 
 // ================= NOTAS METODOLÓGICAS =================
 document.getElementById('notas-metodologia').innerHTML = `
@@ -481,8 +506,11 @@ document.getElementById('notas-metodologia').innerHTML = `
   <li><b>Grupo do conteúdo</b>: cruzamento pelo título exato da aula com a Biblioteca PAI (abas de Sessões, Notas e Programas). ${DATA.meta.aviso_grupo}</li>
   <li><b>Ao Vivo vs. Gravado</b>: uma aula é "Ao Vivo" se o título aparece na planilha de Consumos Zoom; caso contrário, "Gravado".</li>
   <li><b>MAU</b>: e-mails únicos com pelo menos uma conclusão de aula no mês. O mês corrente (${DATA.meta.mes_parcial}) está parcial (dados até 17/09) e foi excluído das análises de tendência para não distorcer a leitura.</li>
-  <li><b>Dormência</b>: baseada na última data de conclusão de aula registrada (não há evento de "login" separado nos dados enviados — ver pergunta na aba Métricas Sugeridas).</li>
-  <li><b>Empresas +50% MAU</b>: considera apenas contas com 3 ou mais usuários cadastrados, para evitar ruído estatístico de contas muito pequenas; percentual sobre o total de usuários da conta ativos no último mês fechado (Ago/2026).</li>
+  <li><b>Dormência</b>: baseada na última data de conclusão de aula registrada (não há evento de "login" separado nos dados enviados); considera apenas usuários de contas ativas hoje.</li>
+  <li><b>Empresas Ativas</b>: todos os clientes com contrato ativo hoje; percentual de MAU sobre o total de usuários da conta ativos no último mês fechado (Ago/2026).</li>
+  <li><b>TTFV</b>: dias entre a data de criação do usuário e a primeira conclusão de aula registrada (excluídos casos negativos ou acima de 365 dias, tratados como outlier de dado).</li>
+  <li><b>Retenção por coorte</b>: coorte = mês da primeira conclusão de aula do usuário; M+0/M+1/M+2/M+3 = % desse grupo que voltou a consumir pelo menos 1 aula nos meses seguintes.</li>
+  <li><b>Lead time até o churn</b>: dias entre a última conclusão de aula registrada de qualquer usuário da conta e a data de churn do contrato.</li>
 `;
 
 } catch(err){

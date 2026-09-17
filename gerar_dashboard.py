@@ -117,23 +117,28 @@ def load_contas_contratos():
     conta_status_map = contas.set_index("id")["status_conta"].to_dict()
     conta_nome_map = contas.set_index("id")["nome"].to_dict()
 
+    # CSM: prioriza o contrato ativo; se nao houver, pega o CSM do contrato mais recente
+    contratos_sorted = contratos.sort_values(["ativo", "created_at"], ascending=[False, False])
+    conta_csm_map = contratos_sorted.drop_duplicates(subset="conta_id").set_index("conta_id")["csm"].to_dict()
+
     resumo = {
         "ativas": int((contas["status_conta"] == "Ativa").sum()),
         "inativas": int((contas["status_conta"] == "Inativa").sum()),
         "total": int(len(contas)),
     }
-    return contas, contratos, conta_status_map, conta_nome_map, resumo
+    return contas, contratos, conta_status_map, conta_nome_map, conta_csm_map, resumo
 
 
 # ---------------------------------------------------------------
 # 2. USUARIOS
 # ---------------------------------------------------------------
-def load_usuarios(conta_status_map, conta_nome_map):
+def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
     usuarios = pd.read_csv(DATA / "usuarios.csv")
     usuarios["email"] = usuarios["email"].astype(str).str.strip().str.lower()
     usuarios["data_criacao"] = pd.to_datetime(usuarios["data_criacao"], errors="coerce")
     usuarios["status_conta"] = usuarios["id_conta"].map(conta_status_map)
     usuarios["nome_conta"] = usuarios["id_conta"].map(conta_nome_map)
+    usuarios["csm"] = usuarios["id_conta"].map(conta_csm_map)
     usuarios["usuario_ativo"] = usuarios["status_conta"] == "Ativa"
 
     resumo = {
@@ -210,7 +215,7 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
 
     email_status = usuarios.drop_duplicates(subset="email").set_index("email")[
-        ["usuario_ativo", "status_conta", "nome_conta", "id_conta"]
+        ["usuario_ativo", "status_conta", "nome_conta", "id_conta", "csm"]
     ]
     cp = cp.join(email_status, on="Email")
     return cp
@@ -292,34 +297,136 @@ def dormentes(usuarios, cp):
     usuarios["nunca_consumiu"] = usuarios["ultimo_consumo"].isna()
     usuarios["dias_desde_ultimo"] = (TODAY - usuarios["ultimo_consumo"]).dt.days
 
-    nunca = int(usuarios["nunca_consumiu"].sum())
-    seis_meses = int(((~usuarios["nunca_consumiu"]) & (usuarios["dias_desde_ultimo"] > 182)).sum())
-    tres_meses = int(((~usuarios["nunca_consumiu"]) & (usuarios["dias_desde_ultimo"] > 90)).sum())
+    ativos = usuarios[usuarios["usuario_ativo"]].copy()
+    nunca_mask = ativos["nunca_consumiu"]
+    seis_mask = (~nunca_mask) & (ativos["dias_desde_ultimo"] > 182)
+    tres_mask = (~nunca_mask) & (ativos["dias_desde_ultimo"] > 90)
 
-    return usuarios, {
-        "nunca_consumiram": nunca,
-        "sem_consumo_6m": seis_meses,
-        "sem_consumo_3m": tres_meses,
+    def to_lista(mask):
+        cols = ["nome", "email", "nome_conta", "csm", "dias_desde_ultimo"]
+        d = ativos.loc[mask, cols].copy()
+        d["dias_desde_ultimo"] = d["dias_desde_ultimo"].apply(lambda x: None if pd.isna(x) else int(x))
+        d = d.rename(columns={"nome": "nome_usuario"})
+        d = d.fillna({"nome_conta": "—", "csm": "—"})
+        return d.sort_values("dias_desde_ultimo", ascending=False, na_position="first").to_dict("records")
+
+    resumo = {
+        "nunca_consumiram": int(nunca_mask.sum()),
+        "sem_consumo_6m": int(seis_mask.sum()),
+        "sem_consumo_3m": int(tres_mask.sum()),
+        "total_usuarios_ativos": int(len(ativos)),
         "total_usuarios": int(len(usuarios)),
     }
+    listas = {
+        "nunca": to_lista(nunca_mask),
+        "seis_meses": to_lista(seis_mask),
+        "tres_meses": to_lista(tres_mask),
+    }
+    return usuarios, resumo, listas
 
 
 # ---------------------------------------------------------------
-# 9. EMPRESAS COM +50% MAU
+# 9. EMPRESAS ATIVAS (MAU% por conta)
 # ---------------------------------------------------------------
-def empresas_mau50(usuarios, cp):
+def empresas_ativas(usuarios, cp):
     consumo_mes_email = cp[cp["mes"] == ULTIMO_MES_FECHADO].groupby("Email").size()
     usuarios = usuarios.copy()
     usuarios["ativo_mes_ref"] = usuarios["email"].isin(consumo_mes_email.index)
 
-    por_conta = usuarios.groupby("nome_conta").agg(
+    por_conta = usuarios.groupby("id_conta").agg(
+        nome_conta=("nome_conta", "first"),
         total_usuarios=("id", "count"),
         usuarios_ativos_mes=("ativo_mes_ref", "sum"),
         status_conta=("status_conta", "first"),
+        csm=("csm", "first"),
     ).reset_index()
     por_conta["mau_pct"] = (por_conta["usuarios_ativos_mes"] / por_conta["total_usuarios"] * 100).round(1)
-    por_conta = por_conta[por_conta["total_usuarios"] >= 3]
-    return por_conta[por_conta["mau_pct"] >= 50].sort_values("mau_pct", ascending=False)
+    ativas = por_conta[por_conta["status_conta"] == "Ativa"].sort_values("mau_pct", ascending=False)
+    return ativas.fillna({"csm": "—"})
+
+
+# ---------------------------------------------------------------
+# 10. TIME TO FIRST VALUE (TTFV)
+# ---------------------------------------------------------------
+def ttfv(usuarios, cp):
+    primeiro_consumo = cp.groupby("Email")["data"].min()
+    u = usuarios.copy()
+    u["primeiro_consumo"] = u["email"].map(primeiro_consumo)
+    valid = u.dropna(subset=["primeiro_consumo", "data_criacao"])
+    dias = (valid["primeiro_consumo"].dt.tz_localize(None) - valid["data_criacao"]).dt.days
+    dias = dias[(dias >= 0) & (dias <= 365)]
+    if len(dias) == 0:
+        return {"media_dias": None, "mediana_dias": None, "amostra": 0}
+    return {
+        "media_dias": round(float(dias.mean()), 1),
+        "mediana_dias": float(dias.median()),
+        "amostra": int(len(dias)),
+    }
+
+
+# ---------------------------------------------------------------
+# 11. RETENCAO POR COORTE (ativacao)
+# ---------------------------------------------------------------
+def cohort_retencao(cp):
+    primeiro_consumo = cp.groupby("Email")["data"].min()
+    ativos_por_mes = cp.groupby("mes")["Email"].apply(set)
+    cohort_mes = primeiro_consumo.dt.strftime("%Y-%m")
+
+    meses_ordenados = sorted(ativos_por_mes.index)
+    if len(meses_ordenados) < 2:
+        return []
+    cohorts_recentes = meses_ordenados[-7:-1]  # ultimos 6 cohorts fechados (exclui mes parcial)
+
+    resultado = []
+    for i, cm in enumerate(cohorts_recentes):
+        usuarios_cohort = set(cohort_mes[cohort_mes == cm].index)
+        if not usuarios_cohort:
+            continue
+        linha = {"cohort": cm, "tamanho": len(usuarios_cohort)}
+        idx_cm = meses_ordenados.index(cm)
+        for offset in range(0, 4):
+            idx = idx_cm + offset
+            if idx >= len(meses_ordenados):
+                linha[f"m{offset}"] = None
+                continue
+            mes_alvo = meses_ordenados[idx]
+            ativos_no_mes = ativos_por_mes.get(mes_alvo, set())
+            retidos = len(usuarios_cohort & ativos_no_mes)
+            linha[f"m{offset}"] = round(retidos / len(usuarios_cohort) * 100, 1)
+        resultado.append(linha)
+    return resultado
+
+
+# ---------------------------------------------------------------
+# 12. LEAD TIME ENTRE FIM DO CONSUMO E CHURN
+# ---------------------------------------------------------------
+def lead_time_churn(contratos, usuarios, cp):
+    churned = contratos[~contratos["ativo"]].dropna(subset=["data_churn"])
+    last_consumo_conta = cp.dropna(subset=["id_conta"]).groupby("id_conta")["data"].max()
+    dias_list = []
+    for _, row in churned.iterrows():
+        ultimo = last_consumo_conta.get(row["conta_id"])
+        if ultimo is None or pd.isna(ultimo):
+            continue
+        churn_date = row["data_churn"].tz_localize(None) if row["data_churn"].tzinfo else row["data_churn"]
+        d = (churn_date - ultimo).days
+        if -30 <= d <= 730:  # remove outliers grosseiros
+            dias_list.append(d)
+    if not dias_list:
+        return {"media_dias": None, "mediana_dias": None, "amostra": 0}
+    s = pd.Series(dias_list)
+    return {"media_dias": round(float(s.mean()), 1), "mediana_dias": float(s.median()), "amostra": int(len(s))}
+
+
+# ---------------------------------------------------------------
+# 13. AULAS SEM GRUPO IDENTIFICADO
+# ---------------------------------------------------------------
+def aulas_sem_grupo(cp):
+    sem = cp[cp["grupo"] == "Sem Grupo Identificado"]
+    contagem = sem.groupby("Nome da aula").size().reset_index(name="ocorrencias").sort_values(
+        "ocorrencias", ascending=False
+    )
+    return contagem
 
 
 # ---------------------------------------------------------------
@@ -328,8 +435,8 @@ def empresas_mau50(usuarios, cp):
 def main():
     print(f"Gerando dashboard | hoje={TODAY.date()} | ultimo mes fechado={ULTIMO_MES_FECHADO}")
 
-    contas, contratos, conta_status_map, conta_nome_map, contas_resumo = load_contas_contratos()
-    usuarios, usuarios_resumo = load_usuarios(conta_status_map, conta_nome_map)
+    contas, contratos, conta_status_map, conta_nome_map, conta_csm_map, contas_resumo = load_contas_contratos()
+    usuarios, usuarios_resumo = load_usuarios(conta_status_map, conta_nome_map, conta_csm_map)
 
     mapping = load_titulo_grupo_map()
     aulas_ao_vivo = load_aulas_ao_vivo()
@@ -340,8 +447,19 @@ def main():
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, volume_medio = agregacoes_consumo(cp)
     nota_grupo = load_reviews(mapping)
     downloads_cross = load_downloads(cp)
-    usuarios_dorm, dormentes_resumo = dormentes(usuarios, cp)
-    empresas = empresas_mau50(usuarios, cp)
+    usuarios_dorm, dormentes_resumo, dormentes_listas = dormentes(usuarios, cp)
+    empresas = empresas_ativas(usuarios, cp)
+    ttfv_resumo = ttfv(usuarios, cp)
+    cohort = cohort_retencao(cp)
+    lead_time = lead_time_churn(contratos, usuarios, cp)
+    sem_grupo_tabela = aulas_sem_grupo(cp)
+
+    # MAU como % da base de usuarios ativos
+    mau_mes_list = mau_mes.to_dict("records")
+    for r in mau_mes_list:
+        r["mau_pct_da_base_ativa"] = (
+            round(r["mau"] / usuarios_resumo["ativos"] * 100, 1) if usuarios_resumo["ativos"] else None
+        )
 
     master = {
         "contas": contas_resumo,
@@ -350,12 +468,17 @@ def main():
         "consumo_mes": consumo_mes.to_dict("records"),
         "users_semana": users_semana.to_dict("records"),
         "users_mes": users_mes.to_dict("records"),
-        "mau_mes": mau_mes.to_dict("records"),
+        "mau_mes": mau_mes_list,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
         "downloads_cross": downloads_cross,
         "dormentes": dormentes_resumo,
-        "empresas_mau50": empresas.to_dict("records"),
+        "dormentes_listas": dormentes_listas,
+        "empresas_ativas": empresas.to_dict("records"),
+        "ttfv": ttfv_resumo,
+        "cohort_retencao": cohort,
+        "lead_time_churn": lead_time,
+        "sem_grupo_tabela": sem_grupo_tabela.to_dict("records"),
         "meta": {
             "gerado_em": TODAY.strftime("%Y-%m-%d"),
             "aviso_grupo": (
