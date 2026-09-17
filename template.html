@@ -8,29 +8,21 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <style>
 :root{
-  --bg:#0A1830;
-  --panel:#0F2140;
-  --panel-2:#13284C;
-  --line:rgba(226,236,255,0.10);
-  --ink:#F2F6FF;
-  --ink-dim:#9DB2D6;
-  --gold:#4C8DFF;
-  --gold-soft:rgba(76,141,255,0.16);
-  --green:#5FC7A6;
-  --red:#E0716A;
-  --blue:#4C8DFF;
-  --purple:#7FA9FF;
+  --bg:#F4F8FF;
+  --panel:#FFFFFF;
+  --panel-2:#EAF1FF;
+  --line:rgba(11,45,110,0.10);
+  --ink:#0B1E3D;
+  --ink-dim:#4A6690;
+  --gold:#1E5EFF;
+  --gold-soft:rgba(30,94,255,0.10);
+  --green:#1E9E6B;
+  --red:#D6453B;
+  --blue:#1E5EFF;
+  --purple:#5B6EE8;
   --radius:14px;
 }
-@media (prefers-color-scheme: light){
-  :root:not([data-theme="dark"]){
-    --bg:#F4F8FF; --panel:#FFFFFF; --panel-2:#EAF1FF; --line:rgba(11,45,110,0.10);
-    --ink:#0B1E3D; --ink-dim:#5A7099; --gold:#1E5EFF; --gold-soft:rgba(30,94,255,0.10);
-  }
-}
-:root[data-theme="dark"]{ --bg:#0A1830; --panel:#0F2140; --panel-2:#13284C; --ink:#F2F6FF; --ink-dim:#9DB2D6; --line:rgba(226,236,255,0.10); --gold:#4C8DFF; --gold-soft:rgba(76,141,255,0.16); }
-:root[data-theme="light"]{ --bg:#F4F8FF; --panel:#FFFFFF; --panel-2:#EAF1FF; --line:rgba(11,45,110,0.10); --ink:#0B1E3D; --ink-dim:#5A7099; --gold:#1E5EFF; --gold-soft:rgba(30,94,255,0.10); }
-
+:root[data-theme="dark"]{ --bg:#0A1830; --panel:#0F2140; --panel-2:#13284C; --ink:#F2F6FF; --ink-dim:#9DB2D6; --line:rgba(226,236,255,0.10); --gold:#4C8DFF; --gold-soft:rgba(76,141,255,0.16); --green:#5FC7A6; --red:#E0716A; --purple:#7FA9FF; }
 
 *{box-sizing:border-box;}
 body{
@@ -78,13 +70,18 @@ h1{font-family:Georgia,'Times New Roman',serif; font-size:clamp(28px,4vw,42px); 
 .chart-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px;}
 .chart-card h3{margin:0 0 4px; font-size:14px; font-weight:600;}
 .chart-card p.desc{margin:0 0 14px; font-size:12px; color:var(--ink-dim);}
-.chart-wrap{position:relative; height:280px;}
+.chart-wrap{position:relative; height:280px; display:flex; align-items:center; justify-content:center;}
+.chart-legend{display:flex; gap:16px; justify-content:center; flex-wrap:wrap; margin-top:10px; font-size:12.5px; color:var(--ink-dim);}
+.chart-legend span{display:inline-flex; align-items:center; gap:6px;}
+.chart-legend i{width:9px; height:9px; border-radius:50%; display:inline-block;}
+.download-btn{background:var(--panel-2); border:1px solid var(--line); color:var(--gold); font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; white-space:nowrap;}
+.download-btn:hover{background:var(--gold-soft);}
 .chart-wrap.tall{height:340px;}
 .groups-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px;}
 .group-block{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px;}
 .group-block h4{margin:0 0 10px; font-size:14px; font-weight:600;}
 .mini-line-label{font-size:11px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:0.03em; margin:10px 0 4px;}
-.mini-chart-wrap{position:relative; height:110px;}
+.mini-chart-wrap{position:relative; height:140px;}
 
 .toggle-group{display:inline-flex; background:var(--panel-2); border-radius:8px; padding:3px; margin-left:auto;}
 .toggle-btn{padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer; color:var(--ink-dim); font-weight:600;}
@@ -143,11 +140,13 @@ tr:last-child td{border-bottom:none;}
         <h3>Contas Ativas vs. Inativas</h3>
         <p class="desc">Conta é considerada ativa quando há contrato sem data de churn.</p>
         <div class="chart-wrap"><canvas id="chartContas"></canvas></div>
+        <div class="chart-legend"><span><i style="background:var(--green)"></i>Ativas</span><span><i style="background:var(--red)"></i>Inativas</span></div>
       </div>
       <div class="chart-card">
         <h3>Usuários Ativos vs. Inativos</h3>
         <p class="desc">Usuário herda o status da conta a que pertence.</p>
         <div class="chart-wrap"><canvas id="chartUsuarios"></canvas></div>
+        <div class="chart-legend"><span><i style="background:var(--green)"></i>Ativos</span><span><i style="background:var(--red)"></i>Inativos</span></div>
       </div>
     </div>
 
@@ -170,34 +169,26 @@ tr:last-child td{border-bottom:none;}
   <!-- ================= CONSUMO ================= -->
   <div class="panel" id="consumo">
     <div class="card-head">
-      <div class="section-title" style="margin-top:0;">Aulas Assistidas por Grupo — Ao Vivo vs. Gravado</div>
+      <div class="section-title" style="margin-top:0;">Consumo por Grupo — Aulas Assistidas & Usuários Únicos</div>
       <div class="toggle-group" data-target="consumo-periodo">
         <div class="toggle-btn active" data-val="mes">Mensal</div>
         <div class="toggle-btn" data-val="semana">Semanal</div>
       </div>
     </div>
+    <div class="chart-legend" style="margin-bottom:14px;"><span><i style="background:var(--gold)"></i>Aulas assistidas</span><span><i style="background:var(--purple)"></i>Usuários únicos</span></div>
     <div id="consumoGrupoContainer"></div>
-
-    <div class="card-head" style="margin-top:36px;">
-      <div class="section-title" style="margin-top:0;">Usuários Únicos por Grupo — Ao Vivo vs. Gravado</div>
-      <div class="toggle-group" data-target="users-periodo">
-        <div class="toggle-btn active" data-val="mes">Mensal</div>
-        <div class="toggle-btn" data-val="semana">Semanal</div>
-      </div>
-    </div>
-    <div id="usersGrupoContainer"></div>
   </div>
 
   <!-- ================= USUÁRIOS & MAU ================= -->
   <div class="panel" id="usuarios">
     <div class="grid" id="kpi-usuarios"></div>
 
-    <div class="section-title">Evolução do MAU (mês a mês)</div>
+    <div class="section-title">Evolução do MAU (mês a mês) <span class="n">mês corrente parcial excluído</span></div>
     <div class="chart-card">
       <div class="chart-wrap tall"><canvas id="chartMauFull"></canvas></div>
     </div>
 
-    <div class="section-title">Volume de Aulas Concluídas por Mês</div>
+    <div class="section-title">Volume de Aulas Concluídas por Mês <span class="n">últimos 18 meses</span></div>
     <div class="chart-card">
       <div class="chart-wrap tall"><canvas id="chartVolume"></canvas></div>
     </div>
@@ -208,13 +199,22 @@ tr:last-child td{border-bottom:none;}
     <div class="callout" style="margin-top:0;">Considera apenas usuários de <b>contas ativas hoje</b> — a ideia é dar uma lista acionável pro CS, não histórico de contas já perdidas.</div>
     <div class="grid" id="kpi-dormentes"></div>
 
-    <div class="section-title" style="margin-top:0;">Nunca consumiram nenhuma aula</div>
+    <div class="card-head">
+      <div class="section-title" style="margin-top:0;">Nunca consumiram nenhuma aula</div>
+      <button class="download-btn" data-table="tabelaDormNunca" data-filename="nunca_consumiram.csv">⬇ Baixar CSV</button>
+    </div>
     <div class="table-wrap chart-card"><table id="tabelaDormNunca"></table></div>
 
-    <div class="section-title">Sem consumo há mais de 6 meses</div>
+    <div class="card-head">
+      <div class="section-title">Sem consumo há mais de 6 meses</div>
+      <button class="download-btn" data-table="tabelaDorm6m" data-filename="sem_consumo_6m.csv">⬇ Baixar CSV</button>
+    </div>
     <div class="table-wrap chart-card"><table id="tabelaDorm6m"></table></div>
 
-    <div class="section-title">Sem consumo há mais de 3 meses</div>
+    <div class="card-head">
+      <div class="section-title">Sem consumo há mais de 3 meses</div>
+      <button class="download-btn" data-table="tabelaDorm3m" data-filename="sem_consumo_3m.csv">⬇ Baixar CSV</button>
+    </div>
     <div class="table-wrap chart-card"><table id="tabelaDorm3m"></table></div>
   </div>
 
@@ -237,6 +237,7 @@ tr:last-child td{border-bottom:none;}
     <div class="row2">
       <div class="chart-card">
         <div class="chart-wrap"><canvas id="chartDownloads"></canvas></div>
+        <div class="chart-legend"><span><i style="background:var(--green)"></i>Assistiu</span><span><i style="background:var(--gold)"></i>Sem registro</span></div>
       </div>
       <div class="card">
         <div class="kpi-label">Total de downloads</div>
@@ -325,12 +326,12 @@ document.getElementById('kpi-overview').innerHTML = `
 mkChart(document.getElementById('chartContas'), {
   type:'doughnut',
   data:{ labels:['Ativas','Inativas'], datasets:[{ data:[DATA.contas.ativas, DATA.contas.inativas], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
 });
 mkChart(document.getElementById('chartUsuarios'), {
   type:'doughnut',
   data:{ labels:['Ativos','Inativos'], datasets:[{ data:[DATA.usuarios.ativos, DATA.usuarios.inativos], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
 });
 
 // MAU overview - last 12 closed months (exclude partial current month)
@@ -352,64 +353,58 @@ document.getElementById('tabelaCohort').innerHTML = `
   ${DATA.cohort_retencao.map(r=>`<tr><td>${r.cohort}</td><td>${fmt(r.tamanho)}</td><td>${r.m0!=null?r.m0.toFixed(0)+'%':'—'}</td><td>${r.m1!=null?r.m1.toFixed(0)+'%':'—'}</td><td>${r.m2!=null?r.m2.toFixed(0)+'%':'—'}</td><td>${r.m3!=null?r.m3.toFixed(0)+'%':'—'}</td></tr>`).join('')}
 `;
 
-// ================= CONSUMO POR GRUPO (mini-gráficos de linha) =================
+// ================= CONSUMO POR GRUPO (mini-gráficos de linha, dual-eixo) =================
 let groupCharts = []; // guarda instâncias pra destruir ao trocar de período
 
-function buildGroupContainer(containerId, valueKey){
+function buildGroupContainer(containerId){
   const el = document.getElementById(containerId);
   el.innerHTML = `<div class="groups-grid">` + GRUPOS.map(g => `
     <div class="group-block">
       <h4>${g}</h4>
       <div class="mini-line-label">Ao Vivo</div>
-      <div class="mini-chart-wrap"><canvas id="${containerId}-${valueKey}-vivo-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
+      <div class="mini-chart-wrap"><canvas id="${containerId}-vivo-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
       <div class="mini-line-label">Gravado</div>
-      <div class="mini-chart-wrap"><canvas id="${containerId}-${valueKey}-grav-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
+      <div class="mini-chart-wrap"><canvas id="${containerId}-grav-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
     </div>
   `).join('') + `</div>`;
 }
 
-function renderGroupLine(canvasId, periodos, valores, cor){
+function renderGroupDualLine(canvasId, periodos, aulas, usuariosUnicos, cor){
   const c = document.getElementById(canvasId);
   if (!c) return null;
   return mkChart(c, {
     type:'line',
-    data:{ labels:periodos, datasets:[{ data:valores, borderColor:cor, backgroundColor:cor+'22', fill:true, tension:0.3, pointRadius:2 }] },
+    data:{ labels:periodos, datasets:[
+      { label:'Aulas assistidas', data:aulas, borderColor:cor, backgroundColor:cor+'22', fill:true, tension:0.3, pointRadius:2, yAxisID:'y' },
+      { label:'Usuários únicos', data:usuariosUnicos, borderColor:COLORS.purple, backgroundColor:'transparent', borderDash:[4,3], tension:0.3, pointRadius:2, yAxisID:'y1' },
+    ] },
     options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', font:{size:9, weight:'600'}, color:'var(--ink-dim)', formatter:v=>v>0?fmt(v):''} },
-      scales:{ x:{grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:6}}, y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{font:{size:9}}} } }
+      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', font:{size:9, weight:'600'}, color:ctx=>ctx.datasetIndex===0?cor:COLORS.purple, formatter:v=>v>0?fmt(v):''} },
+      scales:{
+        x:{grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:6}},
+        y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{font:{size:9}}},
+        y1:{beginAtZero:true, position:'right', grid:{display:false}, ticks:{font:{size:9}}},
+      } }
   });
 }
 
 function renderConsumoGrupo(periodoField){
   groupCharts.forEach(c=>c && c.destroy()); groupCharts = [];
-  const dataset = periodoField==='mes' ? DATA.consumo_mes : DATA.consumo_semana;
-  const periodos = [...new Set(dataset.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
-  buildGroupContainer('consumoGrupoContainer','consumo');
+  const dsConsumo = periodoField==='mes' ? DATA.consumo_mes : DATA.consumo_semana;
+  const dsUsers = periodoField==='mes' ? DATA.users_mes : DATA.users_semana;
+  const periodos = [...new Set(dsConsumo.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
+  buildGroupContainer('consumoGrupoContainer');
   GRUPOS.forEach(g=>{
     const slug = g.replace(/[^a-zA-Z0-9]/g,'');
-    const vivo = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Ao Vivo'); return r? r.aulas_assistidas:0; });
-    const grav = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Gravado'); return r? r.aulas_assistidas:0; });
-    groupCharts.push(renderGroupLine(`consumoGrupoContainer-consumo-vivo-${slug}`, periodos, vivo, GRUPO_COLORS[g]));
-    groupCharts.push(renderGroupLine(`consumoGrupoContainer-consumo-grav-${slug}`, periodos, grav, GRUPO_COLORS[g]));
-  });
-}
-
-let userGroupCharts = [];
-function renderUsersGrupo(periodoField){
-  userGroupCharts.forEach(c=>c && c.destroy()); userGroupCharts = [];
-  const dataset = periodoField==='mes' ? DATA.users_mes : DATA.users_semana;
-  const periodos = [...new Set(dataset.map(d=>d[periodoField]))].sort().slice(periodoField==='mes'?-12:-16);
-  buildGroupContainer('usersGrupoContainer','users');
-  GRUPOS.forEach(g=>{
-    const slug = g.replace(/[^a-zA-Z0-9]/g,'');
-    const vivo = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Ao Vivo'); return r? r.usuarios_unicos:0; });
-    const grav = periodos.map(p=>{ const r = dataset.find(d=>d[periodoField]===p && d.grupo===g && d.tipo==='Gravado'); return r? r.usuarios_unicos:0; });
-    userGroupCharts.push(renderGroupLine(`usersGrupoContainer-users-vivo-${slug}`, periodos, vivo, GRUPO_COLORS[g]));
-    userGroupCharts.push(renderGroupLine(`usersGrupoContainer-users-grav-${slug}`, periodos, grav, GRUPO_COLORS[g]));
+    ['vivo','grav'].forEach(tipoKey=>{
+      const tipo = tipoKey==='vivo' ? 'Ao Vivo' : 'Gravado';
+      const aulas = periodos.map(p=>{ const r = dsConsumo.find(d=>d[periodoField]===p && d.grupo===g && d.tipo===tipo); return r? r.aulas_assistidas:0; });
+      const usuarios = periodos.map(p=>{ const r = dsUsers.find(d=>d[periodoField]===p && d.grupo===g && d.tipo===tipo); return r? r.usuarios_unicos:0; });
+      groupCharts.push(renderGroupDualLine(`consumoGrupoContainer-${tipoKey}-${slug}`, periodos, aulas, usuarios, GRUPO_COLORS[g]));
+    });
   });
 }
 renderConsumoGrupo('mes');
-renderUsersGrupo('mes');
 
 if (!window.__toggleListenersBound){
   window.__toggleListenersBound = true;
@@ -417,12 +412,6 @@ if (!window.__toggleListenersBound){
     b.addEventListener('click', ()=>{
       document.querySelectorAll('[data-target="consumo-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
       b.classList.add('active'); renderConsumoGrupo(b.dataset.val);
-    });
-  });
-  document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
-      b.classList.add('active'); renderUsersGrupo(b.dataset.val);
     });
   });
 }
@@ -440,16 +429,17 @@ document.getElementById('kpi-usuarios').innerHTML = `
 
 mkChart(document.getElementById('chartMauFull'), {
   type:'line',
-  data:{ labels:DATA.mau_mes.map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
+  data:{ labels:DATA.mau_mes.filter(x=>x.mes!==DATA.meta.mes_parcial).map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.filter(x=>x.mes!==DATA.meta.mes_parcial).map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
   options:{ plugins:{legend:{display:false}, datalabels:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
 });
 
 const volMes = DATA.mau_mes.map(m=>m.mes);
 const volTotals = DATA.consumo_mes.reduce((acc,d)=>{ acc[d.mes]=(acc[d.mes]||0)+d.aulas_assistidas; return acc; },{});
+const volMesesOrdenados = Object.keys(volTotals).sort().slice(-18); // últimos 18 meses, senão fica ilegível
 mkChart(document.getElementById('chartVolume'), {
   type:'bar',
-  data:{ labels:Object.keys(volTotals).sort(), datasets:[{label:'Aulas concluídas', data:Object.keys(volTotals).sort().map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
-  options:{ plugins:{legend:{display:false}, datalabels:{display:true, anchor:'end', align:'top', font:{size:9}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
+  data:{ labels:volMesesOrdenados, datasets:[{label:'Aulas concluídas', data:volMesesOrdenados.map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, anchor:'end', align:'top', font:{size:10, weight:'600'}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, layout:{padding:{top:20}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxRotation:45, minRotation:45}} } }
 });
 
 // ================= DORMENTES =================
@@ -468,6 +458,25 @@ renderDormTable('tabelaDormNunca', DATA.dormentes_listas.nunca);
 renderDormTable('tabelaDorm6m', DATA.dormentes_listas.seis_meses);
 renderDormTable('tabelaDorm3m', DATA.dormentes_listas.tres_meses);
 
+if (!window.__downloadListenersBound){
+  window.__downloadListenersBound = true;
+  document.querySelectorAll('.download-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const table = document.getElementById(btn.dataset.table);
+      const rows = [...table.querySelectorAll('tr')].map(tr =>
+        [...tr.children].map(td => `"${td.textContent.replace(/"/g,'""')}"`).join(',')
+      );
+      const csv = '\uFEFF' + rows.join('\r\n'); // BOM pra abrir certinho no Excel com acentos
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = btn.dataset.filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+  });
+}
+
 // ================= QUALIDADE =================
 mkChart(document.getElementById('chartNotas'), {
   type:'bar',
@@ -482,7 +491,7 @@ document.getElementById('tabelaNotas').innerHTML = `
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
   data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.vivo], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:13}, formatter:v=>fmt(v)}}, cutout:'65%' }
+  options:{ plugins:{legend:{display:false}, datalabels:{display:true, color:'#fff', font:{weight:'700', size:12}, formatter:(v,ctx)=>{const total=ctx.chart.data.datasets[0].data.reduce((a,b)=>a+b,0); return fmt(v)+' ('+(v/total*100).toFixed(0)+'%)';}, textAlign:'center'}}, cutout:'65%' }
 });
 document.getElementById('kpi-dl-total').textContent = fmt(DATA.downloads_cross.total_downloads);
 
@@ -495,8 +504,8 @@ document.getElementById('tabelaEmpresas').innerHTML = `
 // ================= SEM GRUPO IDENTIFICADO =================
 document.getElementById('callout-semgrupo').innerHTML = `<b>${DATA.meta.aviso_grupo}</b> A lista abaixo mostra o título exato como veio do export do Waid — se algum bater com um título diferente na Biblioteca PAI, é só ajustar um dos dois lados para ficarem idênticos.`;
 document.getElementById('tabelaSemGrupo').innerHTML = `
-  <tr><th>Nome da aula (como veio do Waid)</th><th>Ocorrências no consumo</th></tr>
-  ${DATA.sem_grupo_tabela.map(r=>`<tr><td>${r['Nome da aula']}</td><td>${fmt(r.ocorrencias)}</td></tr>`).join('')}
+  <tr><th>Conteúdo (como veio do Waid)</th><th>Ocorrências no consumo</th></tr>
+  ${DATA.sem_grupo_tabela.map(r=>`<tr><td>${r['Conteúdo']}</td><td>${fmt(r.ocorrencias)}</td></tr>`).join('')}
 `;
 
 // ================= NOTAS METODOLÓGICAS =================

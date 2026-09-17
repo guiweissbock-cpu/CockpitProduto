@@ -206,11 +206,15 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
     cp = pd.read_excel(DATA / "classes_progress.xlsx")
     cp["Email"] = cp["Email"].astype(str).str.strip().str.lower()
     cp["Nome da aula"] = cp["Nome da aula"].astype(str).str.strip()
+    cp["Conteúdo"] = cp["Conteúdo"].astype(str).str.strip()
     cp["data"] = pd.to_datetime(cp["Data de conclusão"], format="%d/%m/%Y %H:%M", errors="coerce")
     cp = cp.dropna(subset=["data"])
 
-    cp["grupo"] = cp["Nome da aula"].map(mapping).fillna("Sem Grupo Identificado")
-    cp["tipo"] = np.where(cp["Nome da aula"].isin(aulas_ao_vivo), "Ao Vivo", "Gravado")
+    # "Conteúdo" bate com a Biblioteca PAI com taxa de match bem maior que "Nome da aula"
+    # (que às vezes vem com prefixo de módulo/expert concatenado). Usamos Conteúdo como
+    # chave de cruzamento de grupo e de identificação de aula ao vivo.
+    cp["grupo"] = cp["Conteúdo"].map(mapping).fillna("Sem Grupo Identificado")
+    cp["tipo"] = np.where(cp["Conteúdo"].isin(aulas_ao_vivo), "Ao Vivo", "Gravado")
     cp["semana"] = cp["data"].dt.strftime("%G-W%V")
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
 
@@ -277,9 +281,9 @@ def load_reviews(mapping):
 def load_downloads(cp):
     dl = pd.read_excel(DATA / "downloads.xlsx")
     dl["E-mail"] = dl["E-mail"].astype(str).str.strip().str.lower()
-    dl["Aula"] = dl["Aula"].astype(str).str.strip()
-    watched_pairs = set(zip(cp["Email"], cp["Nome da aula"]))
-    dl["assistiu_depois"] = dl.apply(lambda r: (r["E-mail"], r["Aula"]) in watched_pairs, axis=1)
+    dl["Conteúdo"] = dl["Conteúdo"].astype(str).str.strip()
+    watched_pairs = set(zip(cp["Email"], cp["Conteúdo"]))
+    dl["assistiu_depois"] = dl.apply(lambda r: (r["E-mail"], r["Conteúdo"]) in watched_pairs, axis=1)
     return {
         "baixou_e_assistiu": int(dl["assistiu_depois"].sum()),
         "baixou_nao_assistiu": int((~dl["assistiu_depois"]).sum()),
@@ -423,7 +427,7 @@ def lead_time_churn(contratos, usuarios, cp):
 # ---------------------------------------------------------------
 def aulas_sem_grupo(cp):
     sem = cp[cp["grupo"] == "Sem Grupo Identificado"]
-    contagem = sem.groupby("Nome da aula").size().reset_index(name="ocorrencias").sort_values(
+    contagem = sem.groupby("Conteúdo").size().reset_index(name="ocorrencias").sort_values(
         "ocorrencias", ascending=False
     )
     return contagem
