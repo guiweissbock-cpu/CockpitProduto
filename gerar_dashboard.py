@@ -71,25 +71,6 @@ SHEETS_MAP = {
     "CERTIFICAÇÃO DE VENDEDORES B2B": "Programas Especiais",
     "ESPECIALIZAÇÃO DE VENDEDORES": "Programas Especiais",
 }
-NORM_GRUPO = {
-    "Canais e Parcerias": "Canais e Parcerias",
-    "Pré-Vendas (Prospecção)": "Pré-Vendas",
-    "Líderes de Vendas": "Gestão",
-    "Executivos de Vendas": "Executivos",
-    "PipeLovers Class": "Class",
-    "Planejamento Comercial": "Gestão",
-    "ESPECIALIZAÇÃO ": "Programas Especiais",
-    "CERTIFICAÇÃO EM IA": "Programas Especiais",
-    "Programa de gestão": "Gestão",
-    "Certificação": "Programas Especiais",
-    "Class": "Class",
-    "Pré-Vendas": "Pré-Vendas",
-    "Gestão Comercial": "Gestão",
-    "Executivos": "Executivos",
-    "SDRs": "Pré-Vendas",
-}
-
-
 def clean_json(obj):
     """Troca NaN/Inf por None recursivamente para gerar JSON valido."""
     if isinstance(obj, dict):
@@ -152,6 +133,44 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
 # ---------------------------------------------------------------
 # 3. BIBLIOTECA PAI -> mapa titulo -> grupo
 # ---------------------------------------------------------------
+NORM_GRUPO = {
+ "Canais e Parcerias": "Canais e Parcerias",
+ "Pré-Vendas (Prospecção)": "Pré-Vendas",
+ "Líderes de Vendas": "Gestão",
+ "Executivos de Vendas": "Executivos",
+ "PipeLovers Class": "Class",
+ "Planejamento Comercial": "Gestão",
+ "ESPECIALIZAÇÃO ": "Programas Especiais",
+ "CERTIFICAÇÃO EM IA": "Programas Especiais",
+ "Programa de gestão": "Gestão",
+ "Certificação": "Programas Especiais",
+ "Class": "Class",
+ "Pré-Vendas": "Pré-Vendas",
+ "Gestão Comercial": "Gestão",
+ "Executivos": "Executivos",
+ "SDRs": "Pré-Vendas",
+}
+
+# Correções manuais indicadas pelo time de produto: titulos que a Biblioteca PAI
+# nao tem, tem errado, ou so nao bate por causa de maiusculas/minusculas.
+# Aplicadas por cima do que vier da planilha (tem prioridade).
+MANUAL_OVERRIDES = {
+    "Programa Especialização em Prospecção": "Pré-Vendas",
+    "Módulo 1: Certificação de Vendedores B2B - Prospecção Inteligente e Geração de Demanda": "Executivos",
+    "Programa de Gestão de Vendas B2B": "Gestão",
+    "Inicie sua jornada de Pré Vendas por aqui": "Pré-Vendas",
+    "Módulo 2: Certificação de Vendedores B2B - Pitch, Storytelling e Oratória Comercial": "Executivos",
+    "Inicie sua jornada de Gestão por aqui": "Gestão",
+    "Módulo 3: Certificação de Vendedores B2B - Negociação e Fechamento": "Executivos",
+    "Inicie sua jornada para Executivos por aqui": "Executivos",
+    "Certificação de Vendedores B2B": "Executivos",
+    "Módulo 1: Programa de Gestão - Estratégia de Posicionamento e Planejamento Comercial": "Gestão",
+    "Módulo 4: Certificação de Vendedores B2B - Gestão de Carteira e Expansão de Receita": "Executivos",
+    "Módulo 1: Especialização em Prospecção - Geração de demanda": "Pré-Vendas",
+    "ACELERANDO NEGOCIAÇÕES: HACKS PRÁTICOS PARA FECHAMENTO": "Executivos",
+}
+
+
 def load_titulo_grupo_map():
     path = DATA / "biblioteca_pai.xlsx"
     mapping = {}
@@ -188,7 +207,23 @@ def load_titulo_grupo_map():
     except Exception:
         pass
 
+    # correções manuais tem prioridade sobre a planilha
+    mapping.update(MANUAL_OVERRIDES)
+
     return mapping
+
+
+def _map_case_insensitive(series, mapping):
+    """Cruza uma coluna de titulos com o mapa titulo->grupo, tentando primeiro
+    o match exato e depois um match ignorando maiusculas/minusculas (varios
+    titulos da Biblioteca PAI vem em CAIXA ALTA e nao batem no match exato)."""
+    mapping_lower = {k.lower(): v for k, v in mapping.items()}
+    exato = series.map(mapping)
+    faltando = exato.isna()
+    if faltando.any():
+        via_lower = series[faltando].str.lower().map(mapping_lower)
+        exato.loc[faltando] = via_lower
+    return exato
 
 
 def load_aulas_ao_vivo():
@@ -213,8 +248,12 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
     # "Conteúdo" bate com a Biblioteca PAI com taxa de match bem maior que "Nome da aula"
     # (que às vezes vem com prefixo de módulo/expert concatenado). Usamos Conteúdo como
     # chave de cruzamento de grupo e de identificação de aula ao vivo.
-    cp["grupo"] = cp["Conteúdo"].map(mapping).fillna("Sem Grupo Identificado")
-    cp["tipo"] = np.where(cp["Conteúdo"].isin(aulas_ao_vivo), "Ao Vivo", "Gravado")
+    cp["grupo"] = _map_case_insensitive(cp["Conteúdo"], mapping).fillna("Sem Grupo Identificado")
+    aulas_ao_vivo_lower = {a.lower() for a in aulas_ao_vivo}
+    cp["tipo"] = np.where(
+        cp["Conteúdo"].isin(aulas_ao_vivo) | cp["Conteúdo"].str.lower().isin(aulas_ao_vivo_lower),
+        "Ao Vivo", "Gravado"
+    )
     cp["semana"] = cp["data"].dt.strftime("%G-W%V")
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
 
@@ -251,14 +290,25 @@ def agregacoes_consumo(cp):
     mau_mes = cp.dropna(subset=["Email"]).groupby("mes")["Email"].nunique().reset_index(name="mau").sort_values("mes")
     mau_mes["variacao_pct"] = mau_mes["mau"].pct_change() * 100
 
-    vol_mes = cp.groupby("mes").size().reset_index(name="total_aulas")
-    media_aulas_mes = float(vol_mes["total_aulas"].mean())
+    # Volume medio considera so os ultimos 12 meses FECHADOS (exclui o mes parcial e os
+    # meses iniciais de baixíssimo volume, que distorciam a media historica pra baixo).
+    vol_mes = cp.groupby("mes").size().reset_index(name="total_aulas").sort_values("mes")
     usuarios_por_mes = cp.groupby("mes")["Email"].nunique()
-    media_por_usuario = float((vol_mes.set_index("mes")["total_aulas"] / usuarios_por_mes).mean())
+    meses_fechados = [m for m in vol_mes["mes"] if m != MES_ATUAL]
+    ultimos_12 = meses_fechados[-12:]
+    vol_ultimos_12 = vol_mes[vol_mes["mes"].isin(ultimos_12)]
+    media_aulas_mes = float(vol_ultimos_12["total_aulas"].mean()) if len(vol_ultimos_12) else None
+    media_por_usuario = float(
+        (vol_ultimos_12.set_index("mes")["total_aulas"] / usuarios_por_mes.reindex(ultimos_12)).mean()
+    ) if len(vol_ultimos_12) else None
 
     return (
         consumo_semana, consumo_mes, users_semana, users_mes, mau_mes,
-        {"media_aulas_por_mes": media_aulas_mes, "media_aulas_por_usuario_mes": media_por_usuario},
+        {
+            "media_aulas_por_mes": media_aulas_mes,
+            "media_aulas_por_usuario_mes": media_por_usuario,
+            "periodo": f"{ultimos_12[0]} a {ultimos_12[-1]}" if ultimos_12 else "—",
+        },
     )
 
 
@@ -268,7 +318,7 @@ def agregacoes_consumo(cp):
 def load_reviews(mapping):
     rv = pd.read_excel(DATA / "reviews_contents.xlsx")
     rv["Curso"] = rv["Curso"].astype(str).str.strip()
-    rv["grupo"] = rv["Curso"].map(mapping).fillna("Sem Grupo Identificado")
+    rv["grupo"] = _map_case_insensitive(rv["Curso"], mapping).fillna("Sem Grupo Identificado")
     nota_grupo = rv.groupby("grupo")["Avaliação"].agg(["mean", "count"]).reset_index()
     nota_grupo.columns = ["grupo", "nota_media", "qtd_avaliacoes"]
     nota_grupo["nota_media"] = nota_grupo["nota_media"].round(2)
@@ -371,7 +421,7 @@ def ttfv(usuarios, cp):
 # ---------------------------------------------------------------
 # 11. RETENCAO POR COORTE (ativacao)
 # ---------------------------------------------------------------
-def cohort_retencao(cp):
+def cohort_retencao(cp, inicio="2026-01"):
     primeiro_consumo = cp.groupby("Email")["data"].min()
     ativos_por_mes = cp.groupby("mes")["Email"].apply(set)
     cohort_mes = primeiro_consumo.dt.strftime("%Y-%m")
@@ -379,7 +429,8 @@ def cohort_retencao(cp):
     meses_ordenados = sorted(ativos_por_mes.index)
     if len(meses_ordenados) < 2:
         return []
-    cohorts_recentes = meses_ordenados[-7:-1]  # ultimos 6 cohorts fechados (exclui mes parcial)
+    # cohorts desde o inicio do ano corrente ate o mes mais recente com dado (inclui o mes parcial)
+    cohorts_recentes = [m for m in meses_ordenados if m >= inicio]
 
     resultado = []
     for i, cm in enumerate(cohorts_recentes):
@@ -464,6 +515,15 @@ def main():
         r["mau_pct_da_base_ativa"] = (
             round(r["mau"] / usuarios_resumo["ativos"] * 100, 1) if usuarios_resumo["ativos"] else None
         )
+    fechados = [r for r in mau_mes_list if r["mes"] != MES_ATUAL]
+    mau_resumo = {
+        "mes_atual_pct": fechados[-1]["mau_pct_da_base_ativa"] if fechados else None,
+        "mes_atual_mes": fechados[-1]["mes"] if fechados else None,
+        "media_pct_12m": (
+            round(sum(r["mau_pct_da_base_ativa"] for r in fechados[-12:]) / len(fechados[-12:]), 1)
+            if fechados else None
+        ),
+    }
 
     master = {
         "contas": contas_resumo,
@@ -473,6 +533,7 @@ def main():
         "users_semana": users_semana.to_dict("records"),
         "users_mes": users_mes.to_dict("records"),
         "mau_mes": mau_mes_list,
+        "mau_resumo": mau_resumo,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
         "downloads_cross": downloads_cross,
