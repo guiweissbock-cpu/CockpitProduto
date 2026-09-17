@@ -144,7 +144,7 @@ tr:last-child td{border-bottom:none;}
     <div class="section-title">Outros indicadores de saúde</div>
     <div class="grid" id="kpi-extra"></div>
 
-    <div class="section-title">Retenção por Coorte de Ativação <span class="n">desde Jan/2026 (9 meses) · % que voltaram a consumir M+1, M+2, M+3</span></div>
+    <div class="section-title">Retenção por Coorte de Ativação <span class="n">desde Jan/2026 (9 meses) · % que voltaram a consumir em cada mês seguinte, até M+9</span></div>
     <div class="chart-card">
       <div class="table-wrap">
         <table id="tabelaCohort"></table>
@@ -219,6 +219,12 @@ tr:last-child td{border-bottom:none;}
       </div>
     </div>
 
+    <div class="card-head">
+      <div class="section-title" style="margin-top:0;">Avaliações Individuais</div>
+      <button class="download-btn" data-table="tabelaReviews" data-filename="avaliacoes.csv">⬇ Baixar CSV</button>
+    </div>
+    <div class="table-wrap chart-card"><table id="tabelaReviews"></table></div>
+
     <div class="section-title">Downloads (Offline) x Consumo Registrado</div>
     <div class="row2">
       <div class="chart-card">
@@ -235,6 +241,8 @@ tr:last-child td{border-bottom:none;}
 
   <!-- ================= CONTAS ================= -->
   <div class="panel" id="contas">
+    <div class="grid" id="kpi-mau-buckets"></div>
+
     <div class="section-title" style="margin-top:0;">Empresas Ativas <span class="n">todos os clientes com contrato ativo hoje, ordenado por % de MAU (usuários ativos no último mês fechado — Ago/2026)</span></div>
     <div class="table-wrap chart-card">
       <table id="tabelaEmpresas"></table>
@@ -314,7 +322,7 @@ const mauClosed = DATA.mau_mes.filter(x=>x.mes !== DATA.meta.mes_parcial).slice(
 mkChart(document.getElementById('chartMauOverview'), {
   type:'line',
   data:{ labels:mauClosed.map(x=>x.mes), datasets:[{ label:'MAU', data:mauClosed.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.15)', fill:true, tension:0.3 }]},
-  options:{ plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'top', color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}} } }
+  options:{ layout:{padding:{top:26}}, plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'top', offset:4, color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, suggestedMax:Math.max(...mauClosed.map(x=>x.mau))*1.18, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}} } }
 });
 
 // ----- Outros indicadores: TTFV, Lead time de churn -----
@@ -323,11 +331,15 @@ document.getElementById('kpi-extra').innerHTML = `
   <div class="card"><div class="kpi-label">MAU médio (últimos 12 meses)</div><div class="kpi-value gold">${DATA.mau_resumo.media_pct_12m!=null?DATA.mau_resumo.media_pct_12m.toFixed(1)+'%':'—'}</div><div class="kpi-sub">Média mensal de usuários únicos ativos vs. a base ativa de hoje</div></div>
   <div class="card"><div class="kpi-label">Time-to-First-Value (TTFV)</div><div class="kpi-value gold">${DATA.ttfv.mediana_dias!=null ? DATA.ttfv.mediana_dias.toFixed(0)+' dias' : '—'}</div><div class="kpi-sub">Mediana entre criação do usuário e 1ª aula concluída (média: ${DATA.ttfv.media_dias!=null?DATA.ttfv.media_dias.toFixed(1):'—'} dias, n=${fmt(DATA.ttfv.amostra)})</div></div>
   <div class="card"><div class="kpi-label">Lead time até o Churn</div><div class="kpi-value" style="color:var(--red)">${DATA.lead_time_churn.mediana_dias!=null ? DATA.lead_time_churn.mediana_dias.toFixed(0)+' dias' : '—'}</div><div class="kpi-sub">Mediana entre a última aula consumida e a data de churn (média: ${DATA.lead_time_churn.media_dias!=null?DATA.lead_time_churn.media_dias.toFixed(1):'—'} dias, n=${fmt(DATA.lead_time_churn.amostra)})</div></div>
+  <div class="card"><div class="kpi-label">Contas com MAU ≥ 50%</div><div class="kpi-value green">${DATA.mau_buckets.acima_50.n} <span style="font-size:16px;">(${DATA.mau_buckets.acima_50.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas</div></div>
+  <div class="card"><div class="kpi-label">Contas com MAU 25% – 49%</div><div class="kpi-value" style="color:var(--gold)">${DATA.mau_buckets.entre_25_49.n} <span style="font-size:16px;">(${DATA.mau_buckets.entre_25_49.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas</div></div>
+  <div class="card"><div class="kpi-label">Contas com MAU &lt; 25%</div><div class="kpi-value red">${DATA.mau_buckets.abaixo_25.n} <span style="font-size:16px;">(${DATA.mau_buckets.abaixo_25.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas — foco de atuação do CS</div></div>
 `;
 
+const cohortOffsets = [0,1,2,3,4,5,6,7,8,9];
 document.getElementById('tabelaCohort').innerHTML = `
-  <tr><th>Coorte (mês de ativação)</th><th>Tamanho</th><th>M+0</th><th>M+1</th><th>M+2</th><th>M+3</th></tr>
-  ${DATA.cohort_retencao.map(r=>`<tr><td>${r.cohort}</td><td>${fmt(r.tamanho)}</td><td>${r.m0!=null?r.m0.toFixed(0)+'%':'—'}</td><td>${r.m1!=null?r.m1.toFixed(0)+'%':'—'}</td><td>${r.m2!=null?r.m2.toFixed(0)+'%':'—'}</td><td>${r.m3!=null?r.m3.toFixed(0)+'%':'—'}</td></tr>`).join('')}
+  <tr><th>Coorte (mês de ativação)</th><th>Tamanho</th>${cohortOffsets.map(o=>`<th>M+${o}</th>`).join('')}</tr>
+  ${DATA.cohort_retencao.map(r=>`<tr><td>${r.cohort}</td><td>${fmt(r.tamanho)}</td>${cohortOffsets.map(o=>{const v=r['m'+o]; return `<td>${v!=null?v.toFixed(0)+'%':'—'}</td>`;}).join('')}</tr>`).join('')}
 `;
 
 // ================= CONSUMO POR GRUPO (mini-gráficos de linha, dual-eixo) =================
@@ -465,6 +477,11 @@ document.getElementById('tabelaNotas').innerHTML = `
   ${DATA.nota_grupo.sort((a,b)=>b.nota_media-a.nota_media).map(r=>`<tr><td>${r.grupo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('')}
 `;
 
+document.getElementById('tabelaReviews').innerHTML = `
+  <tr><th>Aluno</th><th>Curso</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
+  ${DATA.reviews_detalhe.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('')}
+`;
+
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
   data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.vivo], borderWidth:0 }]},
@@ -473,6 +490,11 @@ mkChart(document.getElementById('chartDownloads'), {
 document.getElementById('kpi-dl-total').textContent = fmt(DATA.downloads_cross.total_downloads);
 
 // ================= CONTAS (empresas ativas) =================
+document.getElementById('kpi-mau-buckets').innerHTML = `
+  <div class="card"><div class="kpi-label">Contas com MAU ≥ 50%</div><div class="kpi-value green">${DATA.mau_buckets.acima_50.n} <span style="font-size:16px;">(${DATA.mau_buckets.acima_50.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas</div></div>
+  <div class="card"><div class="kpi-label">Contas com MAU 25% – 49%</div><div class="kpi-value" style="color:var(--gold)">${DATA.mau_buckets.entre_25_49.n} <span style="font-size:16px;">(${DATA.mau_buckets.entre_25_49.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas</div></div>
+  <div class="card"><div class="kpi-label">Contas com MAU &lt; 25%</div><div class="kpi-value red">${DATA.mau_buckets.abaixo_25.n} <span style="font-size:16px;">(${DATA.mau_buckets.abaixo_25.pct}%)</span></div><div class="kpi-sub">De ${DATA.mau_buckets.total} contas ativas — foco de atuação do CS</div></div>
+`;
 document.getElementById('tabelaEmpresas').innerHTML = `
   <tr><th>Empresa</th><th>CSM</th><th>Usuários</th><th>Ativos no mês</th><th>% MAU</th></tr>
   ${DATA.empresas_ativas.map(r=>`<tr><td>${r.nome_conta}</td><td>${r.csm}</td><td>${r.total_usuarios}</td><td>${r.usuarios_ativos_mes}</td><td><b>${r.mau_pct.toFixed(1)}%</b></td></tr>`).join('')}

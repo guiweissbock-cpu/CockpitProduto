@@ -37,6 +37,7 @@ Arquivos esperados em /data:
 """
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -156,7 +157,7 @@ NORM_GRUPO = {
 # Aplicadas por cima do que vier da planilha (tem prioridade).
 MANUAL_OVERRIDES = {
     "Programa Especialização em Prospecção": "Pré-Vendas",
-    "Módulo 1: Certificação de Vendedores B2B - Prospecção Inteligente e Geração de Demanda": "Executivos",
+    "Módulo 1: Certificação de Vendedores B2B - Prospecção Inteligente e Geração de Demanda": "Pré-Vendas",
     "Programa de Gestão de Vendas B2B": "Gestão",
     "Inicie sua jornada de Pré Vendas por aqui": "Pré-Vendas",
     "Módulo 2: Certificação de Vendedores B2B - Pitch, Storytelling e Oratória Comercial": "Executivos",
@@ -168,6 +169,26 @@ MANUAL_OVERRIDES = {
     "Módulo 4: Certificação de Vendedores B2B - Gestão de Carteira e Expansão de Receita": "Executivos",
     "Módulo 1: Especialização em Prospecção - Geração de demanda": "Pré-Vendas",
     "ACELERANDO NEGOCIAÇÕES: HACKS PRÁTICOS PARA FECHAMENTO": "Executivos",
+    "Módulo 5: Certificação de Vendedores B2B - Habilidades Essenciais e Rotina do Vendedor": "Executivos",
+    "Mensagens de prospecção que convertem": "Pré-Vendas",
+    "Módulo 3: Especialização em Prospecção - Produtividade, cadência e consistência": "Pré-Vendas",
+    "COMO CONSTRUIR PERCEPÇÃO DE VALOR A PARTIR DO CONHECIMENTO DE NEGÓCIO": "Class",
+    "Módulo 2: Programa de Gestão - Recrutamento, Remuneração e Desenvolvimento de Equipes": "Gestão",
+    "Módulo 2: Especialização em Prospecção - Engenharia da atenção": "Pré-Vendas",
+    "Os Segredos dos Melhores Pré-vendedores do Brasil": "Pré-Vendas",
+    "Módulo 4: Especialização em Prospecção - Mensagens que geram conversão (WhatsApp, LinkedIn e e-mail)": "Pré-Vendas",
+    "Módulo 3 : Programa de Gestão - Canais de Aquisição e Geração de Demanda B2B": "Gestão",
+    "Módulo 3: Programa de Gestão - Canais de Aquisição e Geração de Demanda B2B": "Gestão",
+    "Certificação em Inteligência Artificial em Vendas B2B": "Programas Especiais",
+    "Módulo 6: Especialização em Prospecção - Mapa de Poder & Multi-Threading": "Pré-Vendas",
+    "Módulo 4: Programa de Gestão - Expansão de receita na base de clientes retenção, upsell": "Gestão",
+    "Abordagens e Prospecção que Funcionam no Começo do Ano": "Pré-Vendas",
+    "Módulo 5: Programa de Gestão - Rotinas de gestão comercial rituais, processos e ferramentas": "Gestão",
+    "Módulo 5: Especialização em Prospecção - Gestão de objeções": "Pré-Vendas",
+    "COMO GERAR MAIS OPORTUNIDADES UTILIZANDO UM FLUXO DE CADÊNCIAS NA PROSPECÇÃO": "Pré-Vendas",
+    "COMO MOTIVAR UMA EQUPE DE VENDAS DESMOTIVADA": "Gestão",
+    "Como Motivar uma Equipe de Vendas Desmotivada": "Gestão",
+    "Tráfego pago com vendas sem bláh bláh bláh": "Class",
 }
 
 
@@ -213,16 +234,28 @@ def load_titulo_grupo_map():
     return mapping
 
 
+def _norm_ws(s):
+    """Colapsa espacos duplos/multiplos em um so, e tira espacos nas pontas."""
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _map_case_insensitive(series, mapping):
-    """Cruza uma coluna de titulos com o mapa titulo->grupo, tentando primeiro
-    o match exato e depois um match ignorando maiusculas/minusculas (varios
-    titulos da Biblioteca PAI vem em CAIXA ALTA e nao batem no match exato)."""
+    """Cruza uma coluna de titulos com o mapa titulo->grupo, tentando: match
+    exato, depois ignorando maiusculas/minusculas, depois normalizando espacos
+    duplicados (varios titulos da Biblioteca PAI e do Waid vem com espacamento
+    ou capitalizacao diferentes e nao batiam no match exato)."""
     mapping_lower = {k.lower(): v for k, v in mapping.items()}
+    mapping_norm = {_norm_ws(k).lower(): v for k, v in mapping.items()}
+
     exato = series.map(mapping)
     faltando = exato.isna()
     if faltando.any():
         via_lower = series[faltando].str.lower().map(mapping_lower)
         exato.loc[faltando] = via_lower
+    faltando = exato.isna()
+    if faltando.any():
+        via_norm = series[faltando].apply(_norm_ws).str.lower().map(mapping_norm)
+        exato.loc[faltando] = via_norm
     return exato
 
 
@@ -322,7 +355,32 @@ def load_reviews(mapping):
     nota_grupo = rv.groupby("grupo")["Avaliação"].agg(["mean", "count"]).reset_index()
     nota_grupo.columns = ["grupo", "nota_media", "qtd_avaliacoes"]
     nota_grupo["nota_media"] = nota_grupo["nota_media"].round(2)
-    return nota_grupo
+
+    # detalhe individual, para a tabela de nota + grupo + comentario qualitativo
+    detalhe = rv[["Aluno", "Curso", "grupo", "Avaliação", "Mensagem", "Data da Avaliação"]].copy()
+    detalhe.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data"]
+    detalhe["comentario"] = detalhe["comentario"].fillna("")
+    detalhe = detalhe.sort_values("nota", ascending=True)
+
+    return nota_grupo, detalhe
+
+
+# ---------------------------------------------------------------
+# 6b. FAIXAS DE MAU POR CONTA (saude da carteira)
+# ---------------------------------------------------------------
+def mau_buckets(empresas_df):
+    total = len(empresas_df)
+    if total == 0:
+        return {"acima_50": {"n": 0, "pct": 0}, "entre_25_49": {"n": 0, "pct": 0}, "abaixo_25": {"n": 0, "pct": 0}, "total": 0}
+    acima_50 = int((empresas_df["mau_pct"] >= 50).sum())
+    entre_25_49 = int(((empresas_df["mau_pct"] >= 25) & (empresas_df["mau_pct"] < 50)).sum())
+    abaixo_25 = int((empresas_df["mau_pct"] < 25).sum())
+    return {
+        "acima_50": {"n": acima_50, "pct": round(acima_50 / total * 100, 1)},
+        "entre_25_49": {"n": entre_25_49, "pct": round(entre_25_49 / total * 100, 1)},
+        "abaixo_25": {"n": abaixo_25, "pct": round(abaixo_25 / total * 100, 1)},
+        "total": total,
+    }
 
 
 # ---------------------------------------------------------------
@@ -439,7 +497,7 @@ def cohort_retencao(cp, inicio="2026-01"):
             continue
         linha = {"cohort": cm, "tamanho": len(usuarios_cohort)}
         idx_cm = meses_ordenados.index(cm)
-        for offset in range(0, 4):
+        for offset in range(0, 10):
             idx = idx_cm + offset
             if idx >= len(meses_ordenados):
                 linha[f"m{offset}"] = None
@@ -500,10 +558,11 @@ def main():
     sem_grupo_pct = (cp["grupo"] == "Sem Grupo Identificado").mean() * 100
 
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, volume_medio = agregacoes_consumo(cp)
-    nota_grupo = load_reviews(mapping)
+    nota_grupo, reviews_detalhe = load_reviews(mapping)
     downloads_cross = load_downloads(cp)
     usuarios_dorm, dormentes_resumo, dormentes_listas = dormentes(usuarios, cp)
     empresas = empresas_ativas(usuarios, cp)
+    mau_buckets_resumo = mau_buckets(empresas)
     ttfv_resumo = ttfv(usuarios, cp)
     cohort = cohort_retencao(cp)
     lead_time = lead_time_churn(contratos, usuarios, cp)
@@ -536,10 +595,12 @@ def main():
         "mau_resumo": mau_resumo,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
+        "reviews_detalhe": reviews_detalhe.to_dict("records"),
         "downloads_cross": downloads_cross,
         "dormentes": dormentes_resumo,
         "dormentes_listas": dormentes_listas,
         "empresas_ativas": empresas.to_dict("records"),
+        "mau_buckets": mau_buckets_resumo,
         "ttfv": ttfv_resumo,
         "cohort_retencao": cohort,
         "lead_time_churn": lead_time,
