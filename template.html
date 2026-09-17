@@ -178,6 +178,12 @@ tr:last-child td{border-bottom:none;}
     <div class="chart-card">
       <div class="chart-wrap tall"><canvas id="chartVolume"></canvas></div>
     </div>
+
+    <div class="section-title">Aprofundamento: MAU por Grupo de Conteúdo <span class="n">usuários únicos que consumiram qualquer aula do grupo no mês (ao vivo + gravado, sem duplicar usuário)</span></div>
+    <div class="table-wrap chart-card" style="margin-bottom:16px;">
+      <table id="tabelaMauGrupo"></table>
+    </div>
+    <div id="mauGrupoContainer"></div>
   </div>
 
   <!-- ================= DORMENTES ================= -->
@@ -429,6 +435,47 @@ mkChart(document.getElementById('chartVolume'), {
   type:'bar',
   data:{ labels:volMesesOrdenados, datasets:[{label:'Aulas concluídas', data:volMesesOrdenados.map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
   options:{ plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, anchor:'end', align:'top', font:{size:10, weight:'600'}, color:'var(--ink-dim)', formatter:v=>fmt(v)}}, layout:{padding:{top:20}}, scales:{ y:{grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}, ticks:{maxRotation:45, minRotation:45}} } }
+});
+
+// ================= MAU POR GRUPO (aprofundamento) =================
+const mesesFechadosGrupo = [...new Set(DATA.mau_grupo_mes.map(x=>x.mes))].filter(m=>m!==DATA.meta.mes_parcial).sort();
+const ultimoMesGrupo = mesesFechadosGrupo[mesesFechadosGrupo.length-1];
+const penultimoMesGrupo = mesesFechadosGrupo[mesesFechadosGrupo.length-2];
+const ultimos12Grupo = mesesFechadosGrupo.slice(-12);
+
+function mauGrupoValor(grupo, mes){
+  const r = DATA.mau_grupo_mes.find(d=>d.grupo===grupo && d.mes===mes);
+  return r ? r.mau : 0;
+}
+
+document.getElementById('tabelaMauGrupo').innerHTML = `
+  <tr><th>Grupo</th><th>MAU último mês (${ultimoMesGrupo})</th><th>Variação vs. mês anterior</th><th>Média 12 meses</th></tr>
+  ${GRUPOS.map(g=>{
+    const atual = mauGrupoValor(g, ultimoMesGrupo);
+    const anterior = mauGrupoValor(g, penultimoMesGrupo);
+    const variacao = anterior>0 ? ((atual-anterior)/anterior*100) : null;
+    const media12 = ultimos12Grupo.reduce((s,m)=>s+mauGrupoValor(g,m),0) / ultimos12Grupo.length;
+    return `<tr><td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${GRUPO_COLORS[g]};margin-right:8px;"></span>${g}</td><td><b>${fmt(atual)}</b></td><td style="color:${variacao==null?'var(--ink-dim)':(variacao>=0?'var(--green)':'var(--red)')}">${variacao==null?'—':(variacao>=0?'▲ ':'▼ ')+pct(variacao)}</td><td>${fmt(media12)}</td></tr>`;
+  }).join('')}
+`;
+
+document.getElementById('mauGrupoContainer').innerHTML = `<div class="groups-grid">` + GRUPOS.map(g=>`
+  <div class="group-block">
+    <h4><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${GRUPO_COLORS[g]};margin-right:8px;"></span>${g}</h4>
+    <div class="mini-chart-wrap" style="height:180px;"><canvas id="mauGrupo-${g.replace(/[^a-zA-Z0-9]/g,'')}"></canvas></div>
+  </div>
+`).join('') + `</div>`;
+
+GRUPOS.forEach(g=>{
+  const slug = g.replace(/[^a-zA-Z0-9]/g,'');
+  const valores = mesesFechadosGrupo.map(m=>mauGrupoValor(g,m));
+  mkChart(document.getElementById(`mauGrupo-${slug}`), {
+    type:'line',
+    data:{ labels:mesesFechadosGrupo, datasets:[{ label:'MAU', data:valores, borderColor:GRUPO_COLORS[g], backgroundColor:GRUPO_COLORS[g]+'22', fill:true, tension:0.3, pointRadius:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, layout:{padding:{top:18}},
+      plugins:{ legend:{display:false}, datalabels:{display:true, align:'top', font:{size:10, weight:'600'}, color:GRUPO_COLORS[g], formatter:v=>v>0?fmt(v):''} },
+      scales:{ x:{grid:{display:false}, ticks:{font:{size:10}, maxTicksLimit:12}}, y:{beginAtZero:true, grid:{color:'rgba(11,45,110,0.06)'}, ticks:{font:{size:10}}} } }
+  });
 });
 
 // ================= DORMENTES =================

@@ -189,6 +189,17 @@ MANUAL_OVERRIDES = {
     "COMO MOTIVAR UMA EQUPE DE VENDAS DESMOTIVADA": "Gestão",
     "Como Motivar uma Equipe de Vendas Desmotivada": "Gestão",
     "Tráfego pago com vendas sem bláh bláh bláh": "Class",
+    "Fundamentos e preparação da negociação B2B": "Executivos",
+    "COMO AUTOCONHECIMENTO E INTELIGÊNCIA EMOCIONAL TE AJUDAM A VENDER MAIS ?": "Pré-Vendas",
+    "COMO AUTOCONHECIMENTO E INTELIGÊNCIA EMOCIONAL TE AJUDAM A VENDER MAIS?": "Pré-Vendas",
+    "Como se preparar para uma reunião de forecast?": "Executivos",
+    "Inicie sua jornada de Canais por aqui": "Canais e Parcerias",
+    "COMO INTELIGÊNCIA ARTIFICIAL VAI TRANSFORMAR O MARKETING B2B?": "Gestão",
+    "Arquitetura de concessões: ceder sem destruir margem": "Executivos",
+    "COMO MAPEAR A CULTURA DE SEU TIME DE VENDAS": "Gestão",
+    "Rituais de Gestão de Vendas B2B": "Gestão",
+    "A ROTA DO VENDEDOR AO GERENTE DE VENDAS": "Gestão",
+    "Construindo uma Carreira Internacional em Vendas B2B": "Pré-Vendas",
 }
 
 
@@ -306,6 +317,7 @@ def agregacoes_consumo(cp):
             cp.groupby([freq_col, "grupo", "tipo"]).size().reset_index(name="aulas_assistidas").sort_values(freq_col)
         )
 
+
     def agg_users(freq_col):
         return (
             cp.dropna(subset=["Email"])
@@ -343,6 +355,23 @@ def agregacoes_consumo(cp):
             "periodo": f"{ultimos_12[0]} a {ultimos_12[-1]}" if ultimos_12 else "—",
         },
     )
+
+
+# ---------------------------------------------------------------
+# 5b. MAU POR GRUPO DE CONTEUDO (aprofundamento da aba Usuarios & MAU)
+# ---------------------------------------------------------------
+def mau_por_grupo(cp):
+    """MAU mensal por grupo de conteudo: usuarios unicos que consumiram
+    QUALQUER aula daquele grupo naquele mes (ao vivo + gravado somados sem
+    duplicar usuario)."""
+    mau_grupo = (
+        cp.dropna(subset=["Email"])
+        .groupby(["mes", "grupo"])["Email"]
+        .nunique()
+        .reset_index(name="mau")
+        .sort_values("mes")
+    )
+    return mau_grupo
 
 
 # ---------------------------------------------------------------
@@ -440,21 +469,31 @@ def dormentes(usuarios, cp):
 # ---------------------------------------------------------------
 # 9. EMPRESAS ATIVAS (MAU% por conta)
 # ---------------------------------------------------------------
-def empresas_ativas(usuarios, cp):
+def empresas_ativas(usuarios, cp, contas, conta_csm_map):
     consumo_mes_email = cp[cp["mes"] == ULTIMO_MES_FECHADO].groupby("Email").size()
     usuarios = usuarios.copy()
     usuarios["ativo_mes_ref"] = usuarios["email"].isin(consumo_mes_email.index)
 
     por_conta = usuarios.groupby("id_conta").agg(
-        nome_conta=("nome_conta", "first"),
         total_usuarios=("id", "count"),
         usuarios_ativos_mes=("ativo_mes_ref", "sum"),
-        status_conta=("status_conta", "first"),
-        csm=("csm", "first"),
     ).reset_index()
-    por_conta["mau_pct"] = (por_conta["usuarios_ativos_mes"] / por_conta["total_usuarios"] * 100).round(1)
-    ativas = por_conta[por_conta["status_conta"] == "Ativa"].sort_values("mau_pct", ascending=False)
-    return ativas.fillna({"csm": "—"})
+
+    # parte de TODAS as contas ativas (nao so das que tem usuario cadastrado em /usuarios),
+    # pra nao perder contas sem nenhum usuario na contagem total.
+    ativas_base = contas[contas["status_conta"] == "Ativa"][["id", "nome"]].rename(
+        columns={"id": "id_conta", "nome": "nome_conta"}
+    )
+    ativas = ativas_base.merge(por_conta, on="id_conta", how="left")
+    ativas["total_usuarios"] = ativas["total_usuarios"].fillna(0).astype(int)
+    ativas["usuarios_ativos_mes"] = ativas["usuarios_ativos_mes"].fillna(0).astype(int)
+    ativas["csm"] = ativas["id_conta"].map(conta_csm_map).fillna("—")
+    ativas["mau_pct"] = np.where(
+        ativas["total_usuarios"] > 0,
+        (ativas["usuarios_ativos_mes"] / ativas["total_usuarios"] * 100).round(1),
+        0.0,
+    )
+    return ativas.sort_values("mau_pct", ascending=False)
 
 
 # ---------------------------------------------------------------
@@ -558,10 +597,11 @@ def main():
     sem_grupo_pct = (cp["grupo"] == "Sem Grupo Identificado").mean() * 100
 
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, volume_medio = agregacoes_consumo(cp)
+    mau_grupo_mes = mau_por_grupo(cp)
     nota_grupo, reviews_detalhe = load_reviews(mapping)
     downloads_cross = load_downloads(cp)
     usuarios_dorm, dormentes_resumo, dormentes_listas = dormentes(usuarios, cp)
-    empresas = empresas_ativas(usuarios, cp)
+    empresas = empresas_ativas(usuarios, cp, contas, conta_csm_map)
     mau_buckets_resumo = mau_buckets(empresas)
     ttfv_resumo = ttfv(usuarios, cp)
     cohort = cohort_retencao(cp)
@@ -592,6 +632,7 @@ def main():
         "users_semana": users_semana.to_dict("records"),
         "users_mes": users_mes.to_dict("records"),
         "mau_mes": mau_mes_list,
+        "mau_grupo_mes": mau_grupo_mes.to_dict("records"),
         "mau_resumo": mau_resumo,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
