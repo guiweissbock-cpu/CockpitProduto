@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PipeLovers — Painel de Produto & CS</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#0F1512;
@@ -246,17 +246,7 @@ tr:last-child td{border-bottom:none;}
 <script>
 const DATA = __DATA_PLACEHOLDER__;
 
-function boot(){
-try{
-
-const COLORS = { vivo:'#D8B25C', gravado:'#6FA3D8', green:'#6FBF8B', red:'#D9695F', purple:'#B08CD9', dim:'#9FB0A6' };
-const GRUPOS = ["Pré-Vendas","Executivos","Gestão","Canais e Parcerias","Class","Programas Especiais","Sem Grupo Identificado"];
-const GRUPO_COLORS = { "Pré-Vendas":"#D8B25C","Executivos":"#6FA3D8","Gestão":"#6FBF8B","Canais e Parcerias":"#B08CD9","Class":"#D9695F","Programas Especiais":"#7FD1C1","Sem Grupo Identificado":"#5B6A61" };
-
-function fmt(n){ return new Intl.NumberFormat('pt-BR').format(Math.round(n)); }
-function pct(n){ return (n>=0?'+':'') + n.toFixed(1) + '%'; }
-
-// ---------- TABS ----------
+// ---------- TABS (sempre funciona, independente do Chart.js) ----------
 document.querySelectorAll('.tab').forEach(t=>{
   t.addEventListener('click', ()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -266,7 +256,22 @@ document.querySelectorAll('.tab').forEach(t=>{
   });
 });
 
+function boot(){
+try{
+
+const COLORS = { vivo:'#D8B25C', gravado:'#6FA3D8', green:'#6FBF8B', red:'#D9695F', purple:'#B08CD9', dim:'#9FB0A6' };
+const GRUPOS = ["Pré-Vendas","Executivos","Gestão","Canais e Parcerias","Class","Programas Especiais","Sem Grupo Identificado"];
+const GRUPO_COLORS = { "Pré-Vendas":"#D8B25C","Executivos":"#6FA3D8","Gestão":"#6FBF8B","Canais e Parcerias":"#B08CD9","Class":"#D9695F","Programas Especiais":"#7FD1C1","Sem Grupo Identificado":"#5B6A61" };
+
+function fmt(n){ return new Intl.NumberFormat('pt-BR').format(Math.round(n)); }
+function pct(n){ return (n>=0?'+':'') + n.toFixed(1) + '%'; }
+function mkChart(ctx, config){
+  if (typeof Chart === 'undefined') return null;
+  return new Chart(ctx, config);
+}
+
 function chartDefaults(){
+  if (typeof Chart === 'undefined') return;
   Chart.defaults.color = getComputedStyle(document.body).getPropertyValue('--ink-dim').trim() || '#9FB0A6';
   Chart.defaults.font.family = "Inter, sans-serif";
   Chart.defaults.font.size = 11.5;
@@ -287,12 +292,12 @@ document.getElementById('kpi-overview').innerHTML = `
   <div class="card"><div class="kpi-label">Usuários Inativos</div><div class="kpi-value red">${fmt(DATA.usuarios.inativos)}</div><div class="kpi-sub">Contas sem contrato ativo</div></div>
 `;
 
-new Chart(document.getElementById('chartContas'), {
+mkChart(document.getElementById('chartContas'), {
   type:'doughnut',
   data:{ labels:['Ativas','Inativas'], datasets:[{ data:[DATA.contas.ativas, DATA.contas.inativas], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
   options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
 });
-new Chart(document.getElementById('chartUsuarios'), {
+mkChart(document.getElementById('chartUsuarios'), {
   type:'doughnut',
   data:{ labels:['Ativos','Inativos'], datasets:[{ data:[DATA.usuarios.ativos, DATA.usuarios.inativos], backgroundColor:[COLORS.green, COLORS.red], borderWidth:0 }]},
   options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
@@ -300,7 +305,7 @@ new Chart(document.getElementById('chartUsuarios'), {
 
 // MAU overview - last 12 closed months (exclude partial current month)
 const mauClosed = DATA.mau_mes.filter(x=>x.mes !== DATA.meta.mes_parcial).slice(-12);
-new Chart(document.getElementById('chartMauOverview'), {
+mkChart(document.getElementById('chartMauOverview'), {
   type:'line',
   data:{ labels:mauClosed.map(x=>x.mes), datasets:[{ label:'MAU', data:mauClosed.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(216,178,92,0.15)', fill:true, tension:0.3 }]},
   options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}} } }
@@ -342,7 +347,7 @@ function renderConsumoGrupo(periodoField){
     datasets.push({label:g+' (Gravado)', data:grav, backgroundColor:GRUPO_COLORS[g]+'88', stack:'stack1'});
   });
   if(chartConsumoGrupo) chartConsumoGrupo.destroy();
-  chartConsumoGrupo = new Chart(document.getElementById('chartConsumoGrupo'), {
+  chartConsumoGrupo = mkChart(document.getElementById('chartConsumoGrupo'), {
     type:'bar',
     data:{ labels:periodos, datasets },
     options:{ responsive:true, maintainAspectRatio:false,
@@ -361,7 +366,7 @@ function renderUsersGrupo(periodoField){
     datasets.push({label:g+' (Gravado)', data:grav, backgroundColor:GRUPO_COLORS[g]+'88', stack:'stack1'});
   });
   if(chartUsersGrupo) chartUsersGrupo.destroy();
-  chartUsersGrupo = new Chart(document.getElementById('chartUsersGrupo'), {
+  chartUsersGrupo = mkChart(document.getElementById('chartUsersGrupo'), {
     type:'bar',
     data:{ labels:periodos, datasets },
     options:{ responsive:true, maintainAspectRatio:false,
@@ -372,18 +377,21 @@ function renderUsersGrupo(periodoField){
 renderConsumoGrupo('mes');
 renderUsersGrupo('mes');
 
-document.querySelectorAll('[data-target="consumo-periodo"] .toggle-btn').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    document.querySelectorAll('[data-target="consumo-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active'); renderConsumoGrupo(b.dataset.val);
+if (!window.__toggleListenersBound){
+  window.__toggleListenersBound = true;
+  document.querySelectorAll('[data-target="consumo-periodo"] .toggle-btn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      document.querySelectorAll('[data-target="consumo-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); renderConsumoGrupo(b.dataset.val);
+    });
   });
-});
-document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(b=>{
-  b.addEventListener('click', ()=>{
-    document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active'); renderUsersGrupo(b.dataset.val);
+  document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      document.querySelectorAll('[data-target="users-periodo"] .toggle-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); renderUsersGrupo(b.dataset.val);
+    });
   });
-});
+}
 
 // ================= USUÁRIOS & MAU =================
 const lastMau = mauClosed[mauClosed.length-1];
@@ -396,7 +404,7 @@ document.getElementById('kpi-usuarios').innerHTML = `
   <div class="card"><div class="kpi-label">Aulas concluídas / usuário ativo / mês</div><div class="kpi-value">${DATA.volume_medio.media_aulas_por_usuario_mes.toFixed(1)}</div><div class="kpi-sub">Média histórica</div></div>
 `;
 
-new Chart(document.getElementById('chartMauFull'), {
+mkChart(document.getElementById('chartMauFull'), {
   type:'line',
   data:{ labels:DATA.mau_mes.map(x=>x.mes), datasets:[{ label:'MAU', data:DATA.mau_mes.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(216,178,92,0.12)', fill:true, tension:0.25, pointRadius:2 }]},
   options:{ plugins:{legend:{display:false}}, scales:{ y:{beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
@@ -404,7 +412,7 @@ new Chart(document.getElementById('chartMauFull'), {
 
 const volMes = DATA.mau_mes.map(m=>m.mes);
 const volTotals = DATA.consumo_mes.reduce((acc,d)=>{ acc[d.mes]=(acc[d.mes]||0)+d.aulas_assistidas; return acc; },{});
-new Chart(document.getElementById('chartVolume'), {
+mkChart(document.getElementById('chartVolume'), {
   type:'bar',
   data:{ labels:Object.keys(volTotals).sort(), datasets:[{label:'Aulas concluídas', data:Object.keys(volTotals).sort().map(m=>volTotals[m]), backgroundColor:COLORS.purple}]},
   options:{ plugins:{legend:{display:false}}, scales:{ y:{grid:{color:'rgba(255,255,255,0.05)'}}, x:{grid:{display:false}, ticks:{maxTicksLimit:14}} } }
@@ -417,7 +425,7 @@ document.getElementById('kpi-dormentes').innerHTML = `
 `;
 
 // ================= QUALIDADE =================
-new Chart(document.getElementById('chartNotas'), {
+mkChart(document.getElementById('chartNotas'), {
   type:'bar',
   data:{ labels:DATA.nota_grupo.map(x=>x.grupo), datasets:[{ label:'Nota média', data:DATA.nota_grupo.map(x=>x.nota_media), backgroundColor:DATA.nota_grupo.map(x=>GRUPO_COLORS[x.grupo]||COLORS.dim) }]},
   options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(255,255,255,0.05)'}}, y:{grid:{display:false}} } }
@@ -427,7 +435,7 @@ document.getElementById('tabelaNotas').innerHTML = `
   ${DATA.nota_grupo.sort((a,b)=>b.nota_media-a.nota_media).map(r=>`<tr><td>${r.grupo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('')}
 `;
 
-new Chart(document.getElementById('chartDownloads'), {
+mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
   data:{ labels:['Baixou e assistiu (registrado)','Baixou e sem registro de conclusão'], datasets:[{ data:[DATA.downloads_cross.baixou_e_assistiu, DATA.downloads_cross.baixou_nao_assistiu], backgroundColor:[COLORS.green, COLORS.gold||'#D8B25C'], borderWidth:0 }]},
   options:{ plugins:{legend:{position:'bottom'}}, cutout:'65%' }
@@ -486,19 +494,34 @@ document.getElementById('notas-metodologia').innerHTML = `
 }
 
 function startWhenReady(){
-  var tries = 0;
-  (function check(){
+  boot(); // sempre roda: números, tabelas e textos aparecem mesmo sem Chart.js
+  if (typeof Chart === 'undefined'){
+    loadChartFallback();
+  }
+}
+
+function loadChartFallback(){
+  const CDNS = [
+    'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
+    'https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js',
+  ];
+  let i = 0;
+  function tryNext(){
     if (typeof Chart !== 'undefined'){ boot(); return; }
-    tries++;
-    if (tries > 100){ // ~10s
+    if (i >= CDNS.length){
       const banner = document.createElement('div');
-      banner.style.cssText = 'background:#3a1414;border:1px solid #a33;color:#ffd6d6;padding:16px 20px;border-radius:10px;margin-bottom:20px;font-size:13px;';
-      banner.textContent = 'Não foi possível carregar a biblioteca de gráficos (Chart.js) via CDN. Verifique sua conexão com a internet ou algum bloqueador de scripts, e recarregue a página.';
+      banner.style.cssText = 'background:#3a1414;border:1px solid #a33;color:#ffd6d6;padding:14px 18px;border-radius:10px;margin-bottom:20px;font-size:13px;';
+      banner.textContent = 'Os números e tabelas estão corretos, mas os gráficos não carregaram (a biblioteca Chart.js foi bloqueada pela rede ou por uma extensão do navegador). Tente desativar bloqueadores de anúncio/script para este site e recarregar.';
       document.querySelector('.wrap').prepend(banner);
       return;
     }
-    setTimeout(check, 100);
-  })();
+    const s = document.createElement('script');
+    s.src = CDNS[i++];
+    s.onload = ()=>boot();
+    s.onerror = tryNext;
+    document.head.appendChild(s);
+  }
+  tryNext();
 }
 
 if (document.readyState === 'loading'){
