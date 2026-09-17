@@ -1,0 +1,45 @@
+name: Atualizar Dashboard
+
+on:
+  push:
+    paths:
+      - "data/**"
+      - "gerar_dashboard.py"
+      - "template.html"
+  schedule:
+    # roda todo dia às 09:00 (horário de Brasília = 12:00 UTC)
+    - cron: "0 12 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Gerar dashboard
+        run: python gerar_dashboard.py
+
+      - name: Commit index.html atualizado
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "Nada mudou no index.html, pulando commit."
+          else
+            git commit -m "Dashboard atualizado - $(date '+%d/%m/%Y %H:%M')"
+            git push
+          fi
