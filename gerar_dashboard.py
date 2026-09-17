@@ -29,6 +29,10 @@ Arquivos esperados em /data:
   downloads.xlsx         -> export de downloads offline (Codigo,
                             Aluno, E-mail, Aula, Conteudo, Status,
                             Baixado em, Expira em)
+  csat_ao_vivo.csv       -> export do Zoom da pesquisa de satisfacao
+                            pos-aula ao vivo (survey report). Vem com
+                            secoes extras antes da tabela de respostas;
+                            o script acha o cabecalho de verdade sozinho.
   biblioteca_pai.xlsx    -> planilha PAI de biblioteca de conteudos
                             (muda pouco, so re-exporte se o
                             catalogo de aulas mudar)
@@ -384,14 +388,89 @@ def load_reviews(mapping):
     nota_grupo = rv.groupby("grupo")["Avaliação"].agg(["mean", "count"]).reset_index()
     nota_grupo.columns = ["grupo", "nota_media", "qtd_avaliacoes"]
     nota_grupo["nota_media"] = nota_grupo["nota_media"].round(2)
+    nota_grupo["tipo"] = "Gravado"
 
     # detalhe individual, para a tabela de nota + grupo + comentario qualitativo
     detalhe = rv[["Aluno", "Curso", "grupo", "Avaliação", "Mensagem", "Data da Avaliação"]].copy()
     detalhe.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data"]
     detalhe["comentario"] = detalhe["comentario"].fillna("")
+    detalhe["tipo"] = "Gravado"
     detalhe = detalhe.sort_values("nota", ascending=True)
 
     return nota_grupo, detalhe
+
+
+def _classificar_topico_ao_vivo(topico):
+    """Classifica o topico da reuniao Zoom no grupo de conteudo, usando os
+    prefixos de marca que a PipeLovers usa nos titulos das sessoes ao vivo
+    (ex: 'PipeLovers💜 Canais & Parcerias:', 'PipeLovers🧡 Executivos de
+    Vendas:', 'PipeLovers💚SDRs:' etc) -- mais robusto que tentar casar o
+    titulo inteiro com a Biblioteca PAI, que nem sempre tem a sessao ao vivo
+    cadastrada com o mesmo texto."""
+    if not isinstance(topico, str) or not topico.strip() or topico.strip() == "N/D":
+        return "Sem Grupo Identificado"
+    t = topico.lower()
+    if "canais" in t or "parcerias" in t:
+        return "Canais e Parcerias"
+    if "gestão comercial" in t or "gestao comercial" in t or "programa de gestão" in t or "programa de gestao" in t:
+        return "Gestão"
+    if "executivos de vendas" in t:
+        return "Executivos"
+    if "certificação de vendedores b2b" in t or "certificacao de vendedores b2b" in t:
+        return "Executivos"
+    if "sdrs" in t or "pré-vendas" in t or "pre-vendas" in t or "especialização em prospecção" in t or "especializacao em prospeccao" in t:
+        return "Pré-Vendas"
+    if "certificação em inteligência artificial" in t or "certificacao em inteligencia artificial" in t or "bench" in t:
+        return "Programas Especiais"
+    if "class" in t:
+        return "Class"
+    return "Sem Grupo Identificado"
+
+
+def load_csat_ao_vivo():
+    """Le o export de CSAT das sessoes ao vivo (pesquisa pos-aula do Zoom).
+    O arquivo vem com secoes extras antes da tabela de respostas de verdade
+    e com colunas 'fantasma' de padding no final -- pulamos ate a linha do
+    cabecalho real e limitamos as 15 colunas que interessam."""
+    path = DATA / "csat_ao_vivo.csv"
+    if not path.exists():
+        return pd.DataFrame(columns=["grupo", "nota_media", "qtd_avaliacoes", "tipo"]), pd.DataFrame(
+            columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo"]
+        )
+
+    cols = [
+        "idx", "id_usuario", "nome_usuario", "email", "data_envio", "coletado_de", "topico",
+        "id_reuniao", "nome_resposta", "nota_geral", "nota_aplicacao", "nota_conhecimento",
+        "nota_comunicacao", "comentario_critica", "comentario_sugestao",
+    ]
+    # acha a linha do cabecalho de verdade procurando pela coluna conhecida
+    with open(path, encoding="utf-8-sig") as f:
+        linhas = f.readlines()
+    header_idx = next(
+        (i for i, l in enumerate(linhas) if l.startswith("#,ID do usuário") or l.startswith("#,\"ID do usuário")),
+        None,
+    )
+    if header_idx is None:
+        return pd.DataFrame(columns=["grupo", "nota_media", "qtd_avaliacoes", "tipo"]), pd.DataFrame(
+            columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo"]
+        )
+
+    rv = pd.read_csv(path, skiprows=header_idx + 1, header=None, usecols=range(15), names=cols, encoding="utf-8-sig")
+    rv["grupo"] = rv["topico"].apply(_classificar_topico_ao_vivo)
+
+    nota_grupo_vivo = rv.groupby("grupo")["nota_geral"].agg(["mean", "count"]).reset_index()
+    nota_grupo_vivo.columns = ["grupo", "nota_media", "qtd_avaliacoes"]
+    nota_grupo_vivo["nota_media"] = nota_grupo_vivo["nota_media"].round(2)
+    nota_grupo_vivo["tipo"] = "Ao Vivo"
+
+    detalhe_vivo = rv[["nome_resposta", "topico", "grupo", "nota_geral", "comentario_critica", "data_envio"]].copy()
+    detalhe_vivo.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data"]
+    detalhe_vivo["comentario"] = detalhe_vivo["comentario"].fillna("")
+    detalhe_vivo["aluno"] = detalhe_vivo["aluno"].fillna("—")
+    detalhe_vivo["tipo"] = "Ao Vivo"
+    detalhe_vivo = detalhe_vivo.dropna(subset=["nota"]).sort_values("nota", ascending=True)
+
+    return nota_grupo_vivo, detalhe_vivo
 
 
 # ---------------------------------------------------------------
@@ -599,6 +678,8 @@ def main():
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, volume_medio = agregacoes_consumo(cp)
     mau_grupo_mes = mau_por_grupo(cp)
     nota_grupo, reviews_detalhe = load_reviews(mapping)
+    nota_grupo_vivo, reviews_detalhe_vivo = load_csat_ao_vivo()
+    nota_grupo_combinado = pd.concat([nota_grupo, nota_grupo_vivo], ignore_index=True)
     downloads_cross = load_downloads(cp)
     usuarios_dorm, dormentes_resumo, dormentes_listas = dormentes(usuarios, cp)
     empresas = empresas_ativas(usuarios, cp, contas, conta_csm_map)
@@ -636,7 +717,10 @@ def main():
         "mau_resumo": mau_resumo,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
+        "nota_grupo_vivo": nota_grupo_vivo.to_dict("records"),
+        "nota_grupo_combinado": nota_grupo_combinado.to_dict("records"),
         "reviews_detalhe": reviews_detalhe.to_dict("records"),
+        "reviews_detalhe_vivo": reviews_detalhe_vivo.to_dict("records"),
         "downloads_cross": downloads_cross,
         "dormentes": dormentes_resumo,
         "dormentes_listas": dormentes_listas,

@@ -212,10 +212,10 @@ tr:last-child td{border-bottom:none;}
 
   <!-- ================= QUALIDADE ================= -->
   <div class="panel" id="qualidade">
-    <div class="section-title" style="margin-top:0;">Nota Média das Aulas por Grupo</div>
+    <div class="section-title" style="margin-top:0;">Nota Média das Aulas por Grupo — Ao Vivo vs. Gravado</div>
     <div class="row2">
       <div class="chart-card">
-        <div class="chart-wrap"><canvas id="chartNotas"></canvas></div>
+        <div class="chart-wrap tall"><canvas id="chartNotas"></canvas></div>
       </div>
       <div class="chart-card">
         <h3>Detalhe por grupo</h3>
@@ -226,8 +226,14 @@ tr:last-child td{border-bottom:none;}
     </div>
 
     <div class="card-head">
-      <div class="section-title" style="margin-top:0;">Avaliações Individuais</div>
-      <button class="download-btn" data-table="tabelaReviews" data-filename="avaliacoes.csv">⬇ Baixar CSV</button>
+      <div class="section-title" style="margin-top:0;">Avaliações Ao Vivo (Zoom/CSAT)</div>
+      <button class="download-btn" data-table="tabelaReviewsVivo" data-filename="avaliacoes_ao_vivo.csv">⬇ Baixar CSV</button>
+    </div>
+    <div class="table-wrap chart-card"><table id="tabelaReviewsVivo"></table></div>
+
+    <div class="card-head">
+      <div class="section-title">Avaliações Gravadas</div>
+      <button class="download-btn" data-table="tabelaReviews" data-filename="avaliacoes_gravadas.csv">⬇ Baixar CSV</button>
     </div>
     <div class="table-wrap chart-card"><table id="tabelaReviews"></table></div>
 
@@ -514,14 +520,27 @@ if (!window.__downloadListenersBound){
 }
 
 // ================= QUALIDADE =================
+const gruposComNota = [...new Set(DATA.nota_grupo_combinado.map(x=>x.grupo))];
+function notaValor(grupo, tipo){
+  const r = DATA.nota_grupo_combinado.find(d=>d.grupo===grupo && d.tipo===tipo);
+  return r ? r.nota_media : null;
+}
 mkChart(document.getElementById('chartNotas'), {
   type:'bar',
-  data:{ labels:DATA.nota_grupo.map(x=>x.grupo), datasets:[{ label:'Nota média', data:DATA.nota_grupo.map(x=>x.nota_media), backgroundColor:DATA.nota_grupo.map(x=>GRUPO_COLORS[x.grupo]||COLORS.dim) }]},
-  options:{ indexAxis:'y', layout:{padding:{right:30}}, plugins:{legend:{display:false}, datalabels:{display:true, align:'right', anchor:'end', clamp:true, clip:false, font:{size:11, weight:'700'}, color:'var(--ink)', formatter:v=>v.toFixed(2)}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(11,45,110,0.06)'}}, y:{grid:{display:false}} } }
+  data:{ labels:gruposComNota, datasets:[
+    { label:'Ao Vivo', data:gruposComNota.map(g=>notaValor(g,'Ao Vivo')), backgroundColor:COLORS.vivo },
+    { label:'Gravado', data:gruposComNota.map(g=>notaValor(g,'Gravado')), backgroundColor:COLORS.purple },
+  ]},
+  options:{ indexAxis:'y', layout:{padding:{right:30}}, plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'right', anchor:'end', clamp:true, clip:false, font:{size:10, weight:'700'}, color:'var(--ink)', formatter:v=>v!=null?v.toFixed(2):''}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(11,45,110,0.06)'}}, y:{grid:{display:false}} } }
 });
 document.getElementById('tabelaNotas').innerHTML = `
-  <tr><th>Grupo</th><th>Nota média</th><th>Avaliações</th></tr>
-  ${DATA.nota_grupo.sort((a,b)=>b.nota_media-a.nota_media).map(r=>`<tr><td>${r.grupo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('')}
+  <tr><th>Grupo</th><th>Tipo</th><th>Nota média</th><th>Avaliações</th></tr>
+  ${DATA.nota_grupo_combinado.sort((a,b)=>a.grupo.localeCompare(b.grupo)||a.tipo.localeCompare(b.tipo)).map(r=>`<tr><td>${r.grupo}</td><td>${r.tipo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('')}
+`;
+
+document.getElementById('tabelaReviewsVivo').innerHTML = `
+  <tr><th>Aluno</th><th>Sessão (tópico Zoom)</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
+  ${DATA.reviews_detalhe_vivo.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('')}
 `;
 
 document.getElementById('tabelaReviews').innerHTML = `
