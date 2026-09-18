@@ -72,6 +72,41 @@ import requests
 
 ROOT = Path(__file__).parent
 DATA = ROOT  # os arquivos manuais (biblioteca, zoom, reviews, downloads, csat) ficam na raiz do repo
+
+# ---------------------------------------------------------------
+# GOOGLE SHEETS: baixa a versao mais recente da Biblioteca PAI e do
+# Consumos Zoom direto do Google Sheets (sem precisar reexportar e
+# subir manualmente), desde que a planilha esteja compartilhada como
+# "qualquer pessoa com o link pode visualizar" e o ID dela esteja
+# configurado nas variaveis de ambiente abaixo.
+# ---------------------------------------------------------------
+GOOGLE_SHEETS = {
+    "BIBLIOTECA_PAI_SHEET_ID": "biblioteca_pai.xlsx",
+    "CONSUMOS_ZOOM_SHEET_ID": "consumos_zoom.xlsx",
+}
+
+
+def _refresh_google_sheets():
+    for env_var, filename in GOOGLE_SHEETS.items():
+        sheet_id = os.environ.get(env_var)
+        if not sheet_id:
+            continue
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            if b"<html" in resp.content[:200].lower():
+                # Google devolve uma pagina de login/erro em HTML quando a
+                # planilha nao esta publica -- detectamos isso aqui em vez
+                # de deixar o pandas falhar com um erro confuso depois.
+                print(f"  AVISO: {env_var} nao esta publica (Google devolveu HTML, nao um xlsx). Usando copia local de {filename}.")
+                continue
+            (DATA / filename).write_bytes(resp.content)
+            print(f"  (via Google Sheets: {filename} atualizado)")
+        except Exception as e:
+            print(f"  AVISO: falha ao baixar {filename} do Google Sheets ({e}). Usando copia local existente.")
+
+
 TEMPLATE = ROOT / "template.html"
 OUTPUT = ROOT / "index.html"
 
@@ -757,6 +792,8 @@ def aulas_sem_grupo(cp):
 # ---------------------------------------------------------------
 def main():
     print(f"Gerando dashboard | hoje={TODAY.date()} | ultimo mes fechado={ULTIMO_MES_FECHADO}")
+
+    _refresh_google_sheets()
 
     contas, contratos, conta_status_map, conta_nome_map, conta_csm_map, contas_resumo = load_contas_contratos()
     usuarios, usuarios_resumo = load_usuarios(conta_status_map, conta_nome_map, conta_csm_map)
