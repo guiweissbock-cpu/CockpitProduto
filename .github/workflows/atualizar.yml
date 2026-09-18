@@ -33,6 +33,8 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BIBLIOTECA_PAI_SHEET_ID: ${{ secrets.BIBLIOTECA_PAI_SHEET_ID }}
+          CONSUMOS_ZOOM_SHEET_ID: ${{ secrets.CONSUMOS_ZOOM_SHEET_ID }}
         run: python gerar_dashboard.py
 
       - name: Commit index.html atualizado
