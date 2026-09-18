@@ -71,7 +71,7 @@ import pandas as pd
 import requests
 
 ROOT = Path(__file__).parent
-DATA = ROOT / "data"
+DATA = ROOT  # os arquivos manuais (biblioteca, zoom, reviews, downloads, csat) ficam na raiz do repo
 TEMPLATE = ROOT / "template.html"
 OUTPUT = ROOT / "index.html"
 
