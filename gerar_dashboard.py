@@ -1,19 +1,40 @@
 """
 PipeLovers — Gerador do Painel de Engajamento & Saúde da Base
 ================================================================
-Le os arquivos em /data, cruza tudo (contas, contratos, usuarios,
-consumo, avaliacoes, downloads, biblioteca de conteudos e sessoes
-Zoom) e gera um index.html autocontido (dados embutidos) na raiz
-do repositorio.
+Cruza contas, contratos, usuarios, consumo, avaliacoes, downloads,
+biblioteca de conteudos e sessoes Zoom, e gera um index.html
+autocontido (dados embutidos) na raiz do repositorio.
 
-Como atualizar os dados no dia a dia:
-  1. Exporte as planilhas mais recentes do Waid / Hubla / base B2B.
+Fonte dos dados (automatico vs manual):
+  Contas, contratos, usuarios e consumo de aulas vem DIRETO do
+  Supabase via API, desde que as variaveis de ambiente SUPABASE_URL
+  e SUPABASE_SERVICE_ROLE_KEY estejam configuradas (no GitHub, isso
+  fica em Settings -> Secrets and variables -> Actions). Com isso,
+  o GitHub Action que roda todo dia as 09h ja pega o dado mais
+  recente sozinho, sem precisar subir planilha nenhuma pra essas 4
+  fontes -- o consumo, inclusive, ja chega em tempo real via
+  webhook da Waid direto no Supabase.
+
+  Biblioteca de conteudos, sessoes Zoom, avaliacoes (CSAT gravado
+  e ao vivo) e downloads AINDA sao manuais -- continuam vindo dos
+  arquivos em /data, ate que a gente crie uma fonte automatica pra
+  eles tambem.
+
+  Se as variaveis do Supabase nao estiverem configuradas (rodando
+  local, por exemplo), o script cai automaticamente pros arquivos
+  csv/xlsx locais em /data no lugar de contas/contratos/usuarios/
+  consumo -- util pra testar sem precisar de credencial nenhuma.
+
+Como atualizar os dados que ainda sao manuais:
+  1. Exporte as planilhas mais recentes (biblioteca, zoom, reviews,
+     downloads, csat).
   2. Sobrescreva os arquivos em /data mantendo EXATAMENTE os mesmos
      nomes de arquivo (veja a lista em ARQUIVOS abaixo).
   3. Rode `python gerar_dashboard.py` (ou deixe o GitHub Action
      rodar sozinho todo dia / a cada push em /data).
 
-Arquivos esperados em /data:
+Arquivos esperados em /data (so usados quando USE_SUPABASE = False,
+ou pras 4 fontes que ainda sao manuais mesmo com Supabase ligado):
   contasb2b.csv        -> nome, created_at, id
   contratos.csv         -> id, created_at, tipo_contrato, csm,
                             data_assinatura, data_churn, conta_id
@@ -41,11 +62,13 @@ Arquivos esperados em /data:
 """
 import json
 import math
+import os
 import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data"
@@ -55,6 +78,35 @@ OUTPUT = ROOT / "index.html"
 # Referencia de "hoje" e do ultimo mes fechado usadas nos calculos de
 # dormencia / tendencia. Ajuste se quiser travar uma data especifica;
 # por padrao usamos a data corrente do sistema que roda o script.
+# ---------------------------------------------------------------
+# CONEXAO COM O SUPABASE (fonte automatica: contas, contratos,
+# usuarios e consumo de aulas vem de la quando as credenciais
+# estiverem configuradas; senao, cai pros arquivos manuais em /data)
+# ---------------------------------------------------------------
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
+
+
+def _supabase_fetch(table, select="*", page_size=1000):
+    """Busca todas as linhas de uma tabela/view do Supabase via API REST
+    (PostgREST), paginando automaticamente (o Supabase limita a resposta
+    por chamada, entao precisamos ir avancando ate acabar)."""
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    rows = []
+    offset = 0
+    while True:
+        params = {"select": select, "limit": page_size, "offset": offset}
+        resp = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=headers, params=params, timeout=60)
+        resp.raise_for_status()
+        batch = resp.json()
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return pd.DataFrame(rows)
+
+
 TODAY = pd.Timestamp.today().normalize()
 MES_ATUAL = TODAY.strftime("%Y-%m")
 # ultimo mes fechado = mes anterior ao mes corrente
@@ -92,8 +144,13 @@ def clean_json(obj):
 # 1. CONTAS / CONTRATOS
 # ---------------------------------------------------------------
 def load_contas_contratos():
-    contas = pd.read_csv(DATA / "contasb2b.csv")
-    contratos = pd.read_csv(DATA / "contratos.csv")
+    if USE_SUPABASE:
+        contas = _supabase_fetch("contasb2b")
+        contratos = _supabase_fetch("contratos")
+        print(f"  (via Supabase: {len(contas)} contas, {len(contratos)} contratos)")
+    else:
+        contas = pd.read_csv(DATA / "contasb2b.csv")
+        contratos = pd.read_csv(DATA / "contratos.csv")
     contratos["data_churn"] = pd.to_datetime(contratos["data_churn"], errors="coerce", utc=True)
     contratos["ativo"] = contratos["data_churn"].isna()
 
@@ -119,7 +176,11 @@ def load_contas_contratos():
 # 2. USUARIOS
 # ---------------------------------------------------------------
 def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
-    usuarios = pd.read_csv(DATA / "usuarios.csv")
+    if USE_SUPABASE:
+        usuarios = _supabase_fetch("usuarios")
+        print(f"  (via Supabase: {len(usuarios)} usuarios)")
+    else:
+        usuarios = pd.read_csv(DATA / "usuarios.csv")
     usuarios["email"] = usuarios["email"].astype(str).str.strip().str.lower()
     usuarios["data_criacao"] = pd.to_datetime(usuarios["data_criacao"], errors="coerce")
     usuarios["status_conta"] = usuarios["id_conta"].map(conta_status_map)
@@ -286,12 +347,43 @@ def load_aulas_ao_vivo():
 # 4. CONSUMO (classes_progress)
 # ---------------------------------------------------------------
 def load_consumo(mapping, aulas_ao_vivo, usuarios):
-    cp = pd.read_excel(DATA / "classes_progress.xlsx")
-    cp["Email"] = cp["Email"].astype(str).str.strip().str.lower()
-    cp["Nome da aula"] = cp["Nome da aula"].astype(str).str.strip()
-    cp["Conteúdo"] = cp["Conteúdo"].astype(str).str.strip()
-    cp["data"] = pd.to_datetime(cp["Data de conclusão"], format="%d/%m/%Y %H:%M", errors="coerce")
-    cp = cp.dropna(subset=["data"])
+    if USE_SUPABASE:
+        empty_cols = ["Email", "Conteúdo", "data"]
+        live = _supabase_fetch("consumo_aulas")
+        historico = _supabase_fetch("consumo_aulas_historico")
+
+        if len(live):
+            # so contam como consumo os registros que a Waid marcou com 100%
+            # (na pratica e o unico valor confiavel que ela envia hoje - ver
+            # nota no README sobre o bug de progresso parcial reportado a Waid)
+            live = live[live["progress"] == 100].copy()
+        if len(live):
+            live["Email"] = live["member_email"].astype(str).str.strip().str.lower()
+            live["Conteúdo"] = live["content_title"].astype(str).str.strip()
+            data_bruta = live["completed_at"].fillna(live["last_event_at"])
+            live["data"] = pd.to_datetime(data_bruta, utc=True, errors="coerce").dt.tz_convert(None)
+            live = live[empty_cols]
+        else:
+            live = pd.DataFrame(columns=empty_cols)
+
+        if len(historico):
+            historico["Email"] = historico["member_email"].astype(str).str.strip().str.lower()
+            historico["Conteúdo"] = historico["content_title"].astype(str).str.strip()
+            historico["data"] = pd.to_datetime(historico["completed_at"], utc=True, errors="coerce").dt.tz_convert(None)
+            historico = historico[empty_cols]
+        else:
+            historico = pd.DataFrame(columns=empty_cols)
+
+        print(f"  (via Supabase: {len(live)} eventos em tempo real + {len(historico)} do historico)")
+        cp = pd.concat([historico, live], ignore_index=True)
+        cp = cp.dropna(subset=["data"])
+    else:
+        cp = pd.read_excel(DATA / "classes_progress.xlsx")
+        cp["Email"] = cp["Email"].astype(str).str.strip().str.lower()
+        cp["Nome da aula"] = cp["Nome da aula"].astype(str).str.strip()
+        cp["Conteúdo"] = cp["Conteúdo"].astype(str).str.strip()
+        cp["data"] = pd.to_datetime(cp["Data de conclusão"], format="%d/%m/%Y %H:%M", errors="coerce")
+        cp = cp.dropna(subset=["data"])
 
     # "Conteúdo" bate com a Biblioteca PAI com taxa de match bem maior que "Nome da aula"
     # (que às vezes vem com prefixo de módulo/expert concatenado). Usamos Conteúdo como
