@@ -825,7 +825,20 @@ def main():
             round(r["mau"] / usuarios_resumo["ativos"] * 100, 1) if usuarios_resumo["ativos"] else None
         )
     fechados = [r for r in mau_mes_list if r["mes"] != MES_ATUAL]
+    parcial = next((r for r in mau_mes_list if r["mes"] == MES_ATUAL), None)
+
+    def _resumo_mes(r):
+        if not r:
+            return None
+        return {"mes": r["mes"], "mau": r["mau"], "pct": r["mau_pct_da_base_ativa"]}
+
     mau_resumo = {
+        # Mês corrente, ainda em andamento (dados parciais até hoje) - para acompanhar avanço.
+        "atual_parcial": _resumo_mes(parcial),
+        # Último mês fechado (o que antes era rotulado, de forma confusa, como "mês atual").
+        "ultimo_fechado": _resumo_mes(fechados[-1]) if fechados else None,
+        "penultimo_fechado": _resumo_mes(fechados[-2]) if len(fechados) >= 2 else None,
+        # Mantidos por compatibilidade (equivalem a "ultimo_fechado").
         "mes_atual_pct": fechados[-1]["mau_pct_da_base_ativa"] if fechados else None,
         "mes_atual_mes": fechados[-1]["mes"] if fechados else None,
         "media_pct_12m": (
