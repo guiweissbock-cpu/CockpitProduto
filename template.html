@@ -89,6 +89,9 @@ h1{font-family:Georgia,'Times New Roman',serif; font-size:clamp(28px,4vw,42px); 
 .toggle-btn{padding:5px 12px; font-size:12px; border-radius:6px; cursor:pointer; color:var(--ink-dim); font-weight:600;}
 .toggle-btn.active{background:var(--gold); color:#1a1305;}
 .card-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;}
+.filter-bar{display:flex; align-items:center; gap:8px;}
+.filter-label{font-size:12px; color:var(--ink-dim); font-weight:600;}
+.filter-select{background:var(--panel-2); border:1px solid var(--line); color:var(--ink); font-size:13px; font-weight:600; padding:6px 10px; border-radius:8px; cursor:pointer;}
 
 table{width:100%; border-collapse:collapse; font-size:13px;}
 th{text-align:left; padding:10px 12px; color:var(--ink-dim); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:0.03em; border-bottom:1px solid var(--line);}
@@ -212,7 +215,13 @@ tr:last-child td{border-bottom:none;}
 
   <!-- ================= QUALIDADE ================= -->
   <div class="panel" id="qualidade">
-    <div class="section-title" style="margin-top:0;">Nota Média das Aulas por Grupo — Ao Vivo vs. Gravado</div>
+    <div class="card-head" style="margin-top:0;">
+      <div class="section-title" style="margin:0;">Nota Média das Aulas por Grupo — Ao Vivo vs. Gravado</div>
+      <div class="filter-bar">
+        <label for="filtroMesNotas" class="filter-label">Período das avaliações:</label>
+        <select id="filtroMesNotas" class="filter-select"></select>
+      </div>
+    </div>
     <div class="row2">
       <div class="chart-card">
         <div class="chart-wrap tall"><canvas id="chartNotas"></canvas></div>
@@ -563,33 +572,82 @@ if (!window.__downloadListenersBound){
 }
 
 // ================= QUALIDADE =================
-const gruposComNota = [...new Set(DATA.nota_grupo_combinado.map(x=>x.grupo))];
-function notaValor(grupo, tipo){
-  const r = DATA.nota_grupo_combinado.find(d=>d.grupo===grupo && d.tipo===tipo);
-  return r ? r.nota_media : null;
+// A data de cada avaliacao vem como string (dd/mm/aaaa ou aaaa-mm-dd,
+// com ou sem hora). Extraimos so o "ano-mes" pra poder agrupar/filtrar
+// sem depender de conseguir parsear a data inteira.
+function anoMesDe(str){
+  if(!str) return null;
+  let m = String(str).match(/^(\d{4})-(\d{2})/);
+  if(m) return `${m[1]}-${m[2]}`;
+  m = String(str).match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if(m) return `${m[3]}-${m[2]}`;
+  return null;
 }
-mkChart(document.getElementById('chartNotas'), {
-  type:'bar',
-  data:{ labels:gruposComNota, datasets:[
-    { label:'Ao Vivo', data:gruposComNota.map(g=>notaValor(g,'Ao Vivo')), backgroundColor:COLORS.vivo },
-    { label:'Gravado', data:gruposComNota.map(g=>notaValor(g,'Gravado')), backgroundColor:COLORS.purple },
-  ]},
-  options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y', layout:{padding:{right:30}}, plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'right', anchor:'end', clamp:true, clip:false, font:{size:10, weight:'700'}, color:'var(--ink)', formatter:v=>v!=null?v.toFixed(2):''}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(11,45,110,0.06)'}}, y:{grid:{display:false}} } }
-});
-document.getElementById('tabelaNotas').innerHTML = `
-  <tr><th>Grupo</th><th>Tipo</th><th>Nota média</th><th>Avaliações</th></tr>
-  ${DATA.nota_grupo_combinado.sort((a,b)=>a.grupo.localeCompare(b.grupo)||a.tipo.localeCompare(b.tipo)).map(r=>`<tr><td>${r.grupo}</td><td>${r.tipo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('')}
-`;
+const MESES_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+function labelAnoMes(am){
+  const [y,m] = am.split('-');
+  return `${MESES_PT[parseInt(m,10)-1]}/${y}`;
+}
+const mesesComNota = [...new Set(
+  [...DATA.reviews_detalhe, ...DATA.reviews_detalhe_vivo].map(r=>anoMesDe(r.data)).filter(Boolean)
+)].sort().reverse();
 
-document.getElementById('tabelaReviewsVivo').innerHTML = `
-  <tr><th>Aluno</th><th>Sessão (tópico Zoom)</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
-  ${DATA.reviews_detalhe_vivo.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('')}
-`;
+const selMesNotas = document.getElementById('filtroMesNotas');
+selMesNotas.innerHTML = `<option value="todos">Todos os períodos</option>` +
+  mesesComNota.map(am=>`<option value="${am}">${labelAnoMes(am)}</option>`).join('');
+selMesNotas.value = 'todos';
 
-document.getElementById('tabelaReviews').innerHTML = `
-  <tr><th>Aluno</th><th>Curso</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
-  ${DATA.reviews_detalhe.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('')}
-`;
+let chartNotasInstance = null;
+function renderQualidade(mesFiltro){
+  const detG = mesFiltro==='todos' ? DATA.reviews_detalhe : DATA.reviews_detalhe.filter(r=>anoMesDe(r.data)===mesFiltro);
+  const detV = mesFiltro==='todos' ? DATA.reviews_detalhe_vivo : DATA.reviews_detalhe_vivo.filter(r=>anoMesDe(r.data)===mesFiltro);
+
+  function agrega(det, tipo){
+    const porGrupo = {};
+    det.forEach(r=>{
+      if(!porGrupo[r.grupo]) porGrupo[r.grupo] = {soma:0, n:0};
+      porGrupo[r.grupo].soma += r.nota;
+      porGrupo[r.grupo].n += 1;
+    });
+    return Object.entries(porGrupo).map(([grupo,v])=>({grupo, tipo, nota_media: Math.round((v.soma/v.n)*100)/100, qtd_avaliacoes: v.n}));
+  }
+  const notaGrupoComb = [...agrega(detG,'Gravado'), ...agrega(detV,'Ao Vivo')];
+  const gruposComNota = [...new Set(notaGrupoComb.map(x=>x.grupo))];
+  function notaValor(grupo, tipo){
+    const r = notaGrupoComb.find(d=>d.grupo===grupo && d.tipo===tipo);
+    return r ? r.nota_media : null;
+  }
+
+  if(chartNotasInstance){
+    chartNotasInstance.destroy();
+    window.allCharts = window.allCharts.filter(c=>c!==chartNotasInstance);
+  }
+  chartNotasInstance = mkChart(document.getElementById('chartNotas'), {
+    type:'bar',
+    data:{ labels:gruposComNota, datasets:[
+      { label:'Ao Vivo', data:gruposComNota.map(g=>notaValor(g,'Ao Vivo')), backgroundColor:COLORS.vivo },
+      { label:'Gravado', data:gruposComNota.map(g=>notaValor(g,'Gravado')), backgroundColor:COLORS.purple },
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, indexAxis:'y', layout:{padding:{right:30}}, plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'right', anchor:'end', clamp:true, clip:false, font:{size:10, weight:'700'}, color:'var(--ink)', formatter:v=>v!=null?v.toFixed(2):''}}, scales:{ x:{min:0,max:5, grid:{color:'rgba(11,45,110,0.06)'}}, y:{grid:{display:false}} } }
+  });
+
+  document.getElementById('tabelaNotas').innerHTML = `
+    <tr><th>Grupo</th><th>Tipo</th><th>Nota média</th><th>Avaliações</th></tr>
+    ${notaGrupoComb.sort((a,b)=>a.grupo.localeCompare(b.grupo)||a.tipo.localeCompare(b.tipo)).map(r=>`<tr><td>${r.grupo}</td><td>${r.tipo}</td><td>${r.nota_media.toFixed(2)} ★</td><td>${fmt(r.qtd_avaliacoes)}</td></tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--ink-dim);">Sem avaliações neste período</td></tr>'}
+  `;
+
+  document.getElementById('tabelaReviewsVivo').innerHTML = `
+    <tr><th>Aluno</th><th>Sessão (tópico Zoom)</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
+    ${detV.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--ink-dim);">Sem avaliações neste período</td></tr>'}
+  `;
+
+  document.getElementById('tabelaReviews').innerHTML = `
+    <tr><th>Aluno</th><th>Curso</th><th>Grupo</th><th>Nota</th><th>Comentário</th><th>Data</th></tr>
+    ${detG.map(r=>`<tr><td>${r.aluno}</td><td>${r.curso}</td><td>${r.grupo}</td><td>${r.nota} ★</td><td>${r.comentario||'—'}</td><td>${r.data}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--ink-dim);">Sem avaliações neste período</td></tr>'}
+  `;
+}
+renderQualidade('todos');
+selMesNotas.addEventListener('change', ()=>renderQualidade(selMesNotas.value));
 
 mkChart(document.getElementById('chartDownloads'), {
   type:'doughnut',
