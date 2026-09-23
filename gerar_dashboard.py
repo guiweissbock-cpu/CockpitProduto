@@ -466,6 +466,14 @@ def agregacoes_consumo(cp):
     mau_mes = cp.dropna(subset=["Email"]).groupby("mes")["Email"].nunique().reset_index(name="mau").sort_values("mes")
     mau_mes["variacao_pct"] = mau_mes["mau"].pct_change() * 100
 
+    # MAU so entre usuarios cuja conta esta ativa HOJE (mesmo criterio usado no card
+    # "Usuarios Ativos") -- usado pra comparar lado a lado com o MAU total (todo mundo
+    # que assistiu, tenha a conta ativa ou nao hoje).
+    mau_mes_ativos = (
+        cp.dropna(subset=["Email"])[cp["usuario_ativo"] == True]
+        .groupby("mes")["Email"].nunique().reset_index(name="mau_ativos").sort_values("mes")
+    )
+
     # Volume medio considera so os ultimos 12 meses FECHADOS (exclui o mes parcial e os
     # meses iniciais de baixíssimo volume, que distorciam a media historica pra baixo).
     vol_mes = cp.groupby("mes").size().reset_index(name="total_aulas").sort_values("mes")
@@ -479,7 +487,7 @@ def agregacoes_consumo(cp):
     ) if len(vol_ultimos_12) else None
 
     return (
-        consumo_semana, consumo_mes, users_semana, users_mes, mau_mes,
+        consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, mau_mes_ativos,
         {
             "media_aulas_por_mes": media_aulas_mes,
             "media_aulas_por_usuario_mes": media_por_usuario,
@@ -849,7 +857,7 @@ def main():
 
     sem_grupo_pct = (cp["grupo"] == "Sem Grupo Identificado").mean() * 100
 
-    consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, volume_medio = agregacoes_consumo(cp)
+    consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, mau_mes_ativos, volume_medio = agregacoes_consumo(cp)
     mau_grupo_mes = mau_por_grupo(cp)
     nota_grupo, reviews_detalhe = load_reviews(mapping)
     nota_grupo_vivo, reviews_detalhe_vivo = load_csat_ao_vivo()
@@ -864,11 +872,15 @@ def main():
     sem_grupo_tabela = aulas_sem_grupo(cp)
 
     # MAU como % da base de usuarios ativos
+    mau_ativos_map = mau_mes_ativos.set_index("mes")["mau_ativos"].to_dict()
     mau_mes_list = mau_mes.to_dict("records")
     for r in mau_mes_list:
         r["mau_pct_da_base_ativa"] = (
             round(r["mau"] / usuarios_resumo["ativos"] * 100, 1) if usuarios_resumo["ativos"] else None
         )
+        # MAU só de quem tem conta ativa hoje (subconjunto do MAU total acima) -- deixa
+        # visivel quanto do consumo vem de gente que já saiu da base.
+        r["mau_ativos"] = int(mau_ativos_map.get(r["mes"], 0))
     fechados = [r for r in mau_mes_list if r["mes"] != MES_ATUAL]
     parcial = next((r for r in mau_mes_list if r["mes"] == MES_ATUAL), None)
 

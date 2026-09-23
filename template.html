@@ -361,12 +361,23 @@ const mauOverviewSeries = mauClosed.concat(mauParcial ? [mauParcial] : []);
 const idxParcialOverview = mauParcial ? mauOverviewSeries.length - 1 : -1;
 mkChart(document.getElementById('chartMauOverview'), {
   type:'line',
-  data:{ labels:mauOverviewSeries.map(x=>x.mes===DATA.meta.mes_parcial? x.mes+' (parcial)' : x.mes), datasets:[{
-    label:'MAU', data:mauOverviewSeries.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.15)', fill:true, tension:0.3,
-    pointBackgroundColor:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?COLORS.gravado:COLORS.vivo),
-    pointRadius:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?5:3),
-    segment:{ borderDash:ctx=> ctx.p1DataIndex===idxParcialOverview ? [6,4] : undefined },
-  }]},
+  data:{ labels:mauOverviewSeries.map(x=>x.mes===DATA.meta.mes_parcial? x.mes+' (parcial)' : x.mes), datasets:[
+    {
+      label:'MAU (todo mundo que assistiu)', data:mauOverviewSeries.map(x=>x.mau), borderColor:COLORS.vivo, backgroundColor:'rgba(76,141,255,0.15)', fill:true, tension:0.3,
+      pointBackgroundColor:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?COLORS.gravado:COLORS.vivo),
+      pointRadius:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?5:3),
+      segment:{ borderDash:ctx=> ctx.p1DataIndex===idxParcialOverview ? [6,4] : undefined },
+      order:1,
+    },
+    {
+      label:'MAU (só contas ativas hoje)', data:mauOverviewSeries.map(x=>x.mau_ativos), borderColor:COLORS.green, backgroundColor:'transparent', fill:false, tension:0.3,
+      pointBackgroundColor:COLORS.green,
+      pointRadius:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?5:3),
+      segment:{ borderDash:ctx=> ctx.p1DataIndex===idxParcialOverview ? [6,4] : [4,2] },
+      borderDash:[4,2],
+      order:0,
+    },
+  ]},
   options:{ responsive:true, maintainAspectRatio:false, layout:{padding:{top:26}}, plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10}}, datalabels:{display:true, align:'top', offset:4, color:'var(--ink)', font:{size:10, weight:'600'}, formatter:v=>fmt(v)}}, scales:{ y:{beginAtZero:true, suggestedMax:Math.max(...mauOverviewSeries.map(x=>x.mau))*1.18, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}} } }
 });
 
