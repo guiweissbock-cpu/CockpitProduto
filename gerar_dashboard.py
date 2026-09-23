@@ -554,35 +554,80 @@ def _classificar_topico_ao_vivo(topico):
     return "Sem Grupo Identificado"
 
 
-def load_csat_ao_vivo():
-    """Le o export de CSAT das sessoes ao vivo (pesquisa pos-aula do Zoom).
+def _ler_csat_generico(path, header_marker, cols):
+    """Le um export de CSAT/enquete do Zoom (pesquisa OU enquete -- os dois
+    formatos que a PipeLovers ja usou pra coletar nota das aulas ao vivo).
     O arquivo vem com secoes extras antes da tabela de respostas de verdade
     e com colunas 'fantasma' de padding no final -- pulamos ate a linha do
-    cabecalho real e limitamos as 15 colunas que interessam."""
-    path = DATA / "csat_ao_vivo.csv"
+    cabecalho real (identificada por header_marker) e usamos so as colunas
+    que interessam (len(cols))."""
     if not path.exists():
-        return pd.DataFrame(columns=["grupo", "nota_media", "qtd_avaliacoes", "tipo"]), pd.DataFrame(
-            columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo"]
-        )
+        return None
+    with open(path, encoding="utf-8-sig") as f:
+        linhas = f.readlines()
+    header_idx = next(
+        (i for i, l in enumerate(linhas) if l.startswith(header_marker) or l.startswith(f'#,"{header_marker.split(",",1)[1]}')),
+        None,
+    )
+    if header_idx is None:
+        return None
+    rv = pd.read_csv(
+        path, skiprows=header_idx + 1, header=None, usecols=range(len(cols)), names=cols, encoding="utf-8-sig"
+    )
+    return rv
 
-    cols = [
+
+def load_csat_ao_vivo():
+    """Le o(s) export(s) de CSAT das sessoes ao vivo.
+
+    A PipeLovers trocou de formulario no Zoom em 21/08/2026: ate 20/08/2026 os
+    dados vinham de uma "Pesquisa" (survey), com coluna extra "ID do usuario";
+    a partir de 21/08/2026 vem de uma "Enquete" (poll), sem essa coluna e com
+    o topico se chamando "Topico/nome" em vez de "Topico da Reuniao". O
+    conteudo (aluno, topico, notas, comentario, data) e equivalente nos dois,
+    entao lemos os dois arquivos (quando existirem) e concatenamos -- sem
+    sobreposicao de datas entre eles, nao ha risco de duplicar.
+
+    csat_ao_vivo_historico.csv -> export congelado do formulario antigo
+                                   (Pesquisa de Satisfacao), ate 20/08/2026.
+                                   So existe pra nao perder o historico -- nao
+                                   precisa ser reexportado.
+    csat_ao_vivo.csv           -> export mais recente do formulario atual
+                                   (Enquete "Avaliacao da Aula"), sempre
+                                   cumulativo desde 21/08/2026. Reexportar e
+                                   sobrescrever esse arquivo sempre que quiser
+                                   atualizar os dados ao vivo.
+    """
+    cols_pesquisa_antiga = [
         "idx", "id_usuario", "nome_usuario", "email", "data_envio", "coletado_de", "topico",
         "id_reuniao", "nome_resposta", "nota_geral", "nota_aplicacao", "nota_conhecimento",
         "nota_comunicacao", "comentario_critica", "comentario_sugestao",
     ]
-    # acha a linha do cabecalho de verdade procurando pela coluna conhecida
-    with open(path, encoding="utf-8-sig") as f:
-        linhas = f.readlines()
-    header_idx = next(
-        (i for i, l in enumerate(linhas) if l.startswith("#,ID do usuário") or l.startswith("#,\"ID do usuário")),
-        None,
+    cols_enquete_atual = [
+        "idx", "nome_usuario", "email", "data_envio", "coletado_de", "topico",
+        "id_reuniao", "nome_resposta", "nota_geral", "nota_aplicacao", "nota_conhecimento",
+        "nota_comunicacao", "comentario_critica", "comentario_sugestao",
+    ]
+
+    partes = []
+    rv_antiga = _ler_csat_generico(
+        DATA / "csat_ao_vivo_historico.csv", "#,ID do usuário", cols_pesquisa_antiga
     )
-    if header_idx is None:
+    if rv_antiga is not None:
+        partes.append(rv_antiga)
+
+    rv_atual = _ler_csat_generico(
+        DATA / "csat_ao_vivo.csv", "#,Nome de usuário", cols_enquete_atual
+    )
+    if rv_atual is not None:
+        partes.append(rv_atual)
+
+    if not partes:
         return pd.DataFrame(columns=["grupo", "nota_media", "qtd_avaliacoes", "tipo"]), pd.DataFrame(
             columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo"]
         )
 
-    rv = pd.read_csv(path, skiprows=header_idx + 1, header=None, usecols=range(15), names=cols, encoding="utf-8-sig")
+    rv = pd.concat(partes, ignore_index=True)
     rv["grupo"] = rv["topico"].apply(_classificar_topico_ao_vivo)
 
     nota_grupo_vivo = rv.groupby("grupo")["nota_geral"].agg(["mean", "count"]).reset_index()
