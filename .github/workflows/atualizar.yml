@@ -7,8 +7,10 @@ on:
       - "gerar_dashboard.py"
       - "template.html"
   schedule:
-    # roda todo dia às 09:00 (horário de Brasília = 12:00 UTC)
-    - cron: "0 12 * * *"
+    # roda duas vezes por dia: ~05h07 e ~08h07 (horário de Brasília = 08:07 e 11:07 UTC)
+    # minuto fora do "cheio" (07) pra evitar a fila de congestionamento do GitHub Actions no início da hora
+    - cron: "7 8 * * *"
+    - cron: "7 11 * * *"
   workflow_dispatch: {}
 
 permissions:
