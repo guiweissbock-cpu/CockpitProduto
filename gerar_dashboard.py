@@ -221,8 +221,14 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
     usuarios["status_conta"] = usuarios["id_conta"].map(conta_status_map)
     usuarios["nome_conta"] = usuarios["id_conta"].map(conta_nome_map)
     usuarios["csm"] = usuarios["id_conta"].map(conta_csm_map)
-    usuarios["usuario_ativo"] = usuarios["status_conta"] == "Ativa"
+    # "Usuario ativo" = membro ATIVO no LMS (Waid), espelhado na coluna usuarios.status
+    # (true = Ativo, false = Inativo). Antes herdava da conta (qualquer contrato sem churn),
+    # o que contava inativos do LMS como ativos e ignorava B2C / contas sem contrato.
+    # Mesmo criterio da view vw_usuarios_contas_ativas no Supabase.
+    usuarios["usuario_ativo"] = usuarios["status"].astype(str).str.strip().str.lower().eq("true")
 
+    print(f"  usuarios ativos (LMS/status): {int(usuarios['usuario_ativo'].sum())} | "
+          f"em conta com contrato vigente: {int((usuarios['status_conta'] == 'Ativa').sum())}")
     resumo = {
         "ativos": int(usuarios["usuario_ativo"].sum()),
         "inativos": int((~usuarios["usuario_ativo"]).sum()),
