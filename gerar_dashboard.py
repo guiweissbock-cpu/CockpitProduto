@@ -384,6 +384,52 @@ def load_aulas_ao_vivo():
         return set()
 
 
+# Segmento (coluna da planilha Consumos Zoom) -> grupo de conteudo do painel
+SEGMENTO_ZOOM_GRUPO = {
+    "class": "Class",
+    "executivo de vendas": "Executivos",
+    "pré-vendas": "Pré-Vendas",
+    "pre-vendas": "Pré-Vendas",
+    "gestão comercial": "Gestão",
+    "gestao comercial": "Gestão",
+    "canais": "Canais e Parcerias",
+}
+
+
+def load_presenca_zoom(mapping, emails_validos):
+    """Presenca nas aulas AO VIVO (aba 'Dados' da planilha Consumos Zoom, preenchida
+    manualmente pelo time). Cada linha = 1 pessoa em 1 aula ao vivo; conta como consumo
+    'Ao Vivo' (e entra no MAU) mesmo que a pessoa nao tenha nenhum evento na Waid.
+    So entram e-mails que existem em usuarios (convidados de fora ficam de fora)."""
+    cols = ["Email", "Conteúdo", "data", "grupo", "tipo"]
+    try:
+        z = pd.read_excel(DATA / "consumos_zoom.xlsx", sheet_name="Dados")
+        z = z[["Nome da Aula", "E-mail", "Data de conclusão", "Segmento"]].copy()
+    except Exception as e:
+        print(f"  (Zoom presenca: nao consegui ler a aba 'Dados': {e})")
+        return pd.DataFrame(columns=cols)
+
+    z["Email"] = z["E-mail"].astype(str).str.strip().str.lower()
+    z["Conteúdo"] = z["Nome da Aula"].astype(str).str.strip()
+    z["data"] = pd.to_datetime(z["Data de conclusão"], errors="coerce")
+    z = z.dropna(subset=["data"])
+    z = z[z["Conteúdo"].ne("") & z["Conteúdo"].ne("nan") & z["Email"].str.contains("@", na=False)]
+    lidas = len(z)
+    z = z[z["Email"].isin(emails_validos)].copy()
+    fora = lidas - len(z)
+    z["_dia"] = z["data"].dt.date
+    z = z.drop_duplicates(subset=["Email", "Conteúdo", "_dia"]).copy()
+
+    # grupo: 1) Biblioteca PAI pelo titulo, 2) coluna Segmento, 3) palavras-chave do titulo
+    grupo = _map_case_insensitive(z["Conteúdo"], mapping)
+    seg = z["Segmento"].astype(str).str.strip().str.lower().map(SEGMENTO_ZOOM_GRUPO)
+    kw = z["Conteúdo"].apply(_classificar_topico_ao_vivo)
+    z["grupo"] = grupo.fillna(seg).fillna(kw.where(kw != "Sem Grupo Identificado")).fillna("Sem Grupo Identificado")
+    z["tipo"] = "Ao Vivo"
+    print(f"  (Zoom presenca: {lidas} linhas validas, {fora} fora de usuarios, {len(z)} candidatas)")
+    return z[cols]
+
+
 # ---------------------------------------------------------------
 # 4. CONSUMO (classes_progress)
 # ---------------------------------------------------------------
@@ -435,6 +481,17 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
         cp["Conteúdo"].isin(aulas_ao_vivo) | cp["Conteúdo"].str.lower().isin(aulas_ao_vivo_lower),
         "Ao Vivo", "Gravado"
     )
+
+    # Presenca nas aulas ao vivo (planilha Zoom): soma ao consumo, sem duplicar quem ja
+    # tem evento da mesma aula na Waid (mesmo e-mail + mesmo titulo).
+    zoom = load_presenca_zoom(mapping, set(usuarios["email"]))
+    if len(zoom):
+        ja_na_waid = set(zip(cp["Email"], cp["Conteúdo"].str.lower()))
+        novo = [(e, c.lower()) not in ja_na_waid for e, c in zip(zoom["Email"], zoom["Conteúdo"])]
+        zoom = zoom[novo]
+        print(f"  (Zoom presenca: +{len(zoom)} presencas somadas ao consumo, "
+              f"{len(set(zoom['Email']) - set(cp['Email']))} pessoas que nao apareciam na Waid)")
+        cp = pd.concat([cp, zoom], ignore_index=True)
     cp["semana"] = cp["data"].dt.strftime("%G-W%V")
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
 
