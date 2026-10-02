@@ -376,12 +376,66 @@ def _map_case_insensitive(series, mapping):
     return exato
 
 
+_ZOOM_CACHE = {}
+
+
+def _zoom_raw():
+    """Presencas das aulas ao vivo no formato da planilha (Nome da Aula, E-mail,
+    Data de conclusão, Segmento). Fonte preferida: tabela consumo_zoom do Supabase
+    (alimentada por sincronizar_zoom.py). Se a tabela nao existir/estiver vazia,
+    cai para data/consumos_zoom.xlsx (aba 'Dados'). Retorna None se nada disponivel."""
+    if "df" in _ZOOM_CACHE:
+        return _ZOOM_CACHE["df"]
+    df = None
+    if USE_SUPABASE:
+        try:
+            t = _supabase_fetch("consumo_zoom", "member_email,content_title,data_conclusao,segmento")
+            if len(t):
+                df = t.rename(columns={
+                    "member_email": "E-mail", "content_title": "Nome da Aula",
+                    "data_conclusao": "Data de conclusão", "segmento": "Segmento"})
+                print(f"  (Zoom: {len(df)} presencas lidas da tabela consumo_zoom do Supabase)")
+        except Exception as e:
+            print(f"  (Zoom: tabela consumo_zoom indisponivel no Supabase: {e})")
+    if df is None:
+        try:
+            df = pd.read_excel(DATA / "consumos_zoom.xlsx", sheet_name="Dados")
+            df = df[["Nome da Aula", "E-mail", "Data de conclusão", "Segmento"]].copy()
+            print(f"  (Zoom: {len(df)} linhas lidas de consumos_zoom.xlsx - fallback)")
+        except Exception as e:
+            print(f"  (Zoom: sem fonte disponivel: {e})")
+            df = None
+    _ZOOM_CACHE["df"] = df
+    return df
+
+
 def load_aulas_ao_vivo():
+    """Nomes das aulas ao vivo (usados para rotular 'Ao Vivo' vs 'Gravado').
+    Une: nomes da tabela aulas_ao_vivo (lista completa, alimentada pela planilha),
+    nomes presentes em consumo_zoom, e - como rede de seguranca - o consumos_zoom.xlsx
+    do repositorio, se existir."""
+    nomes = set()
+    z = _zoom_raw()
+    if z is not None:
+        nomes |= set(z["Nome da Aula"].dropna().astype(str).str.strip().unique())
+    if USE_SUPABASE:
+        try:
+            t = _supabase_fetch("aulas_ao_vivo", "content_title")
+            if len(t):
+                nomes |= set(t["content_title"].dropna().astype(str).str.strip().unique())
+                print(f"  (Ao Vivo: {len(t)} nomes de aula na tabela aulas_ao_vivo)")
+            else:
+                print("  (Ao Vivo: tabela aulas_ao_vivo vazia)")
+        except Exception as e:
+            print(f"  (Ao Vivo: tabela aulas_ao_vivo indisponivel: {e})")
     try:
-        zoom = pd.read_excel(DATA / "consumos_zoom.xlsx", sheet_name="Dados")
-        return set(zoom["Nome da Aula"].dropna().str.strip().unique())
+        x = pd.read_excel(DATA / "consumos_zoom.xlsx", sheet_name="Dados")
+        nomes |= set(x["Nome da Aula"].dropna().astype(str).str.strip().unique())
     except Exception:
-        return set()
+        pass
+    nomes.discard("")
+    print(f"  (Ao Vivo: {len(nomes)} nomes de aula ao vivo no total)")
+    return nomes
 
 
 # Segmento (coluna da planilha Consumos Zoom) -> grupo de conteudo do painel
@@ -402,12 +456,10 @@ def load_presenca_zoom(mapping, emails_validos):
     'Ao Vivo' (e entra no MAU) mesmo que a pessoa nao tenha nenhum evento na Waid.
     So entram e-mails que existem em usuarios (convidados de fora ficam de fora)."""
     cols = ["Email", "Conteúdo", "data", "grupo", "tipo"]
-    try:
-        z = pd.read_excel(DATA / "consumos_zoom.xlsx", sheet_name="Dados")
-        z = z[["Nome da Aula", "E-mail", "Data de conclusão", "Segmento"]].copy()
-    except Exception as e:
-        print(f"  (Zoom presenca: nao consegui ler a aba 'Dados': {e})")
+    z = _zoom_raw()
+    if z is None:
         return pd.DataFrame(columns=cols)
+    z = z.copy()
 
     z["Email"] = z["E-mail"].astype(str).str.strip().str.lower()
     z["Conteúdo"] = z["Nome da Aula"].astype(str).str.strip()
@@ -492,6 +544,7 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
         print(f"  (Zoom presenca: +{len(zoom)} presencas somadas ao consumo, "
               f"{len(set(zoom['Email']) - set(cp['Email']))} pessoas que nao apareciam na Waid)")
         cp = pd.concat([cp, zoom], ignore_index=True)
+    cp["data"] = pd.to_datetime(cp["data"])  # garante dtype unico apos concat (resolucoes ns/us)
     cp["semana"] = cp["data"].dt.strftime("%G-W%V")
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
 
