@@ -191,7 +191,7 @@ tr:last-child td{border-bottom:none;}
 
   <!-- ================= DORMENTES ================= -->
   <div class="panel" id="dormentes">
-    <div class="callout" style="margin-top:0;">Considera apenas usuários de <b>contas ativas hoje</b> — a ideia é dar uma lista acionável pro CS, não histórico de contas já perdidas.</div>
+    <div class="callout" style="margin-top:0;">Considera apenas <b>usuários ativos na Waid hoje</b> — a ideia é dar uma lista acionável pro CS, não histórico de quem já saiu.</div>
     <div class="grid" id="kpi-dormentes"></div>
 
     <div class="card-head">
@@ -351,7 +351,7 @@ document.getElementById('kpi-overview').innerHTML = `
   <div class="card"><div class="kpi-label">Contas Ativas</div><div class="kpi-value green">${fmt(DATA.contas.ativas)}</div><div class="kpi-sub">${contasAtivasPct}% de ${fmt(DATA.contas.total)} contas</div></div>
   <div class="card"><div class="kpi-label">Contas Inativas</div><div class="kpi-value red">${fmt(DATA.contas.inativas)}</div><div class="kpi-sub">${(100-contasAtivasPct).toFixed(1)}% da base</div></div>
   <div class="card"><div class="kpi-label">Usuários Ativos</div><div class="kpi-value green">${fmt(DATA.usuarios.ativos)}</div><div class="kpi-sub">${usuariosAtivosPct}% de ${fmt(DATA.usuarios.total)} usuários</div></div>
-  <div class="card"><div class="kpi-label">Usuários Inativos</div><div class="kpi-value red">${fmt(DATA.usuarios.inativos)}</div><div class="kpi-sub">Contas sem contrato ativo</div></div>
+  <div class="card"><div class="kpi-label">Usuários Inativos</div><div class="kpi-value red">${fmt(DATA.usuarios.inativos)}</div><div class="kpi-sub">Inativos na Waid</div></div>
   <div class="card"><div class="kpi-label">MAU Mês Atual <span style="font-weight:400; text-transform:none; letter-spacing:0;">(parcial)</span></div><div class="kpi-value gold">${mauParcial?fmt(mauParcial.mau):'—'}</div><div class="kpi-sub">${mauParcial?mauParcial.mes+' · até o dia '+hojeDia+', ainda em andamento':'Sem dados do mês corrente'}${mauUltimoFechado?' · mês anterior fechou com '+fmt(mauUltimoFechado.mau):''}</div></div>
 `;
 
@@ -370,7 +370,7 @@ mkChart(document.getElementById('chartMauOverview'), {
       order:1,
     },
     {
-      label:'MAU (só contas ativas hoje)', data:mauOverviewSeries.map(x=>x.mau_ativos), borderColor:COLORS.green, backgroundColor:'transparent', fill:false, tension:0.3,
+      label:'MAU (só usuários ativos na Waid hoje)', data:mauOverviewSeries.map(x=>x.mau_ativos), borderColor:COLORS.green, backgroundColor:'transparent', fill:false, tension:0.3,
       pointBackgroundColor:COLORS.green,
       pointRadius:mauOverviewSeries.map((x,i)=>i===idxParcialOverview?5:3),
       segment:{ borderDash:ctx=> ctx.p1DataIndex===idxParcialOverview ? [6,4] : [4,2] },
@@ -692,7 +692,7 @@ document.getElementById('notas-metodologia').innerHTML = `
   <li><b>Grupo do conteúdo</b>: cruzamento pelo título exato da aula com a Biblioteca PAI (abas de Sessões, Notas e Programas). ${DATA.meta.aviso_grupo}</li>
   <li><b>Ao Vivo vs. Gravado</b>: uma aula é "Ao Vivo" se o título aparece na planilha de Consumos Zoom; caso contrário, "Gravado".</li>
   <li><b>MAU</b>: e-mails únicos com pelo menos uma conclusão de aula no mês. O mês corrente (${DATA.meta.mes_parcial}) está parcial (dados até 17/09) e foi excluído das análises de tendência para não distorcer a leitura.</li>
-  <li><b>Dormência</b>: baseada na última data de conclusão de aula registrada (não há evento de "login" separado nos dados enviados); considera apenas usuários de contas ativas hoje.</li>
+  <li><b>Dormência</b>: baseada na última data de conclusão de aula registrada (não há evento de "login" separado nos dados enviados); considera apenas usuários ativos na Waid hoje.</li>
   <li><b>Empresas Ativas</b>: todos os clientes com contrato ativo hoje; percentual de MAU sobre o total de usuários da conta ativos no último mês fechado (Ago/2026).</li>
   <li><b>TTFV</b>: dias entre a data de criação do usuário e a primeira conclusão de aula registrada (excluídos casos negativos ou acima de 365 dias, tratados como outlier de dado).</li>
   <li><b>Retenção por coorte</b>: coorte = mês da primeira conclusão de aula do usuário; M+0/M+1/M+2/M+3 = % desse grupo que voltou a consumir pelo menos 1 aula nos meses seguintes.</li>
