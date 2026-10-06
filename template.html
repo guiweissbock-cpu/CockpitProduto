@@ -102,6 +102,14 @@ tr:last-child td{border-bottom:none;}
 .pill.ok{background:rgba(111,191,139,0.15); color:var(--green);}
 .pill.warn{background:rgba(216,178,92,0.15); color:var(--gold);}
 .pill.bad{background:rgba(217,105,95,0.15); color:var(--red);}
+.pill.na{background:var(--panel-2); color:var(--ink-dim);}
+#tabelaPaceGrupos tr[data-grupo]{cursor:pointer;}
+#tabelaPaceGrupos tr[data-grupo]:hover td{background:var(--gold-soft);}
+#tabelaPaceGrupos tr.sel td{background:var(--panel-2); font-weight:600;}
+#tabelaPaceGrupos td.num, #tabelaPaceGrupos th.num{text-align:right; font-variant-numeric:tabular-nums;}
+#tabelaPaceGrupos .pill{white-space:nowrap;}
+.table-wrap.no-max{max-height:none;}
+#kpi-pace{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));}
 
 .callout{background:var(--gold-soft); border:1px solid rgba(216,178,92,0.3); border-radius:12px; padding:14px 18px; font-size:13px; color:var(--ink); margin-bottom:18px;}
 .callout b{color:var(--gold);}
@@ -126,6 +134,7 @@ tr:last-child td{border-bottom:none;}
 
   <div class="tabs" id="tabs">
     <div class="tab active" data-panel="visao-geral">Visão Geral</div>
+    <div class="tab" data-panel="pace">PACE de MAU</div>
     <div class="tab" data-panel="consumo">Consumo por Grupo</div>
     <div class="tab" data-panel="usuarios">Usuários & MAU</div>
     <div class="tab" data-panel="dormentes">Usuários Dormentes</div>
@@ -152,6 +161,35 @@ tr:last-child td{border-bottom:none;}
       <div class="table-wrap">
         <table id="tabelaCohort"></table>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= PACE DE MAU ================= -->
+  <div class="panel" id="pace">
+    <div class="card-head" style="margin-bottom:14px;">
+      <div class="section-title" style="margin:0;">PACE de MAU — esperado vs. realizado <span class="n" id="pace-sub"></span></div>
+      <div class="filter-bar">
+        <label for="filtroGrupoPace" class="filter-label">Grupo de acesso:</label>
+        <select id="filtroGrupoPace" class="filter-select"></select>
+      </div>
+    </div>
+    <div class="callout" id="pace-callout" style="margin-top:0;"></div>
+    <div class="grid" id="kpi-pace"></div>
+
+    <div class="section-title">Ritmo do mês <span class="n" id="pace-chart-sub"></span></div>
+    <div class="chart-card">
+      <div class="chart-wrap tall"><canvas id="chartPaceMes"></canvas></div>
+    </div>
+
+    <div class="section-title">Onde estamos bem e onde estamos mal <span class="n">todos os grupos de acesso no dia de hoje · clique numa linha para filtrar</span></div>
+    <div class="card-head" style="justify-content:flex-end; margin-bottom:8px;">
+      <button class="download-btn" data-table="tabelaPaceGrupos" data-filename="pace_mau_grupos.csv">⬇ Baixar CSV</button>
+    </div>
+    <div class="table-wrap no-max chart-card"><table id="tabelaPaceGrupos"></table></div>
+
+    <div class="section-title">Meta vs. realizado mês a mês <span class="n" id="pace-mensal-sub"></span></div>
+    <div class="chart-card">
+      <div class="chart-wrap tall"><canvas id="chartPaceMensal"></canvas></div>
     </div>
   </div>
 
@@ -398,6 +436,184 @@ document.getElementById('tabelaCohort').innerHTML = `
   <tr><th>Coorte (mês de ativação)</th><th>Tamanho</th>${cohortOffsets.map(o=>`<th>M+${o}</th>`).join('')}</tr>
   ${DATA.cohort_retencao.map(r=>`<tr><td>${r.cohort}</td><td>${fmt(r.tamanho)}</td>${cohortOffsets.map(o=>{const v=r['m'+o]; return `<td>${v!=null?v.toFixed(0)+'%':'—'}</td>`;}).join('')}</tr>`).join('')}
 `;
+
+// ================= PACE DE MAU =================
+(function renderPaceTab(){
+  const P = DATA.mau_pace;
+  const MES_ABREV = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const mesLabel = am => { const [y,m]=am.split('-'); return `${MES_ABREV[+m-1]}/${y.slice(2)}`; };
+  const addMes = (am,n) => { const [y,m]=am.split('-').map(Number); const d=new Date(y, m-1+n, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; };
+  const pp = v => v==null ? '—' : v.toFixed(1).replace('.',',') + '%';
+  const ppSigned = v => v==null ? '—' : (v>=0?'+':'') + v.toFixed(1).replace('.',',') + ' p.p.';
+  const dataBR = s => { const [y,m,d]=s.split('-'); return `${d}/${m}`; };
+
+  if (!P || !P.grupos || !P.grupos.length){
+    document.getElementById('pace-callout').innerHTML = 'Sem dados de PACE nesta geração do painel.';
+    return;
+  }
+  const D = P.dias_no_mes, d = P.dia_ref;
+
+  function calc(b){
+    const meta = (b.metas && b.metas[P.mes]!=null) ? b.metas[P.mes] : null;
+    const realizado = d>0 ? b.diario[d-1] : 0;
+    const realizadoN = d>0 ? b.diario_n[d-1] : 0;
+    const curvaHoje = d>0 ? P.curva[d-1] : 0;
+    const esperado = meta!=null ? meta*curvaHoje : null;
+    const ratio = (esperado && esperado>0) ? realizado/esperado : null;
+    const projecao = curvaHoje>0 ? Math.min(realizado/curvaHoje, 100) : null;
+    const gap = esperado!=null ? realizado-esperado : null;
+    const faltam = meta!=null ? Math.max(0, Math.ceil(meta/100*b.base_ativa) - realizadoN) : null;
+    return {meta, realizado, realizadoN, curvaHoje, esperado, ratio, projecao, gap, faltam};
+  }
+  function status(ratio){
+    if (d===0) return {cls:'na', txt:'— Mês começando'};
+    if (ratio==null) return {cls:'na', txt:'— Sem meta'};
+    if (ratio>=1) return {cls:'ok', txt:'▲ No ritmo'};
+    if (ratio>=0.9) return {cls:'warn', txt:'● Atenção'};
+    return {cls:'bad', txt:'▼ Abaixo do ritmo'};
+  }
+
+  const sel = document.getElementById('filtroGrupoPace');
+  sel.innerHTML = P.grupos.map(b=>`<option value="${b.grupo}">${b.grupo}${b.grupo!=='Base inteira'?` (${fmt(b.base_ativa)} usuários)`:''}</option>`).join('');
+
+  document.getElementById('pace-sub').textContent = `${mesLabel(P.mes)} · dados até ${dataBR(P.data_ref)} (dia ${d} de ${D})`;
+  document.getElementById('pace-mensal-sub').textContent = 'barras = % da base ativa que consumiu no mês · linha = meta · mês atual parcial';
+
+  let paceCharts = [];
+  function dropCharts(){
+    paceCharts.forEach(c=>{ if(c){ c.destroy(); window.allCharts = window.allCharts.filter(x=>x!==c); } });
+    paceCharts = [];
+  }
+
+  function renderTabela(selecionado){
+    const linhas = P.grupos.map(b=>({b, c:calc(b)}));
+    const base = linhas[0];
+    const resto = linhas.slice(1).sort((x,y)=>{
+      if (x.c.ratio==null) return 1; if (y.c.ratio==null) return -1; return x.c.ratio - y.c.ratio;
+    });
+    document.getElementById('tabelaPaceGrupos').innerHTML = `
+      <tr><th>Grupo de acesso</th><th class="num">Base ativa</th><th class="num">Meta ${mesLabel(P.mes)}</th><th class="num">Pace esperado hoje</th><th class="num">Realizado hoje</th><th class="num">Gap vs. pace</th><th class="num">Projeção de fechamento</th><th class="num">Faltam p/ meta</th><th>Status</th></tr>
+      ${[base, ...resto].map(({b,c})=>{
+        const st = status(c.ratio);
+        const gapCor = c.gap==null ? 'var(--ink-dim)' : (c.gap>=0 ? 'var(--green)' : 'var(--red)');
+        const aviso = b.amostra_pequena ? ' <span class="pill na" title="Menos de 30 usuários ativos — oscila muito">amostra pequena</span>' : '';
+        return `<tr data-grupo="${b.grupo}" class="${b.grupo===selecionado?'sel':''}">
+          <td>${b.grupo==='Base inteira'?'<b>Base inteira</b>':b.grupo}${aviso}</td>
+          <td class="num">${fmt(b.base_ativa)}</td>
+          <td class="num">${pp(c.meta)}</td>
+          <td class="num">${pp(c.esperado)}</td>
+          <td class="num"><b>${pp(c.realizado)}</b> <span style="color:var(--ink-dim)">(${fmt(c.realizadoN)})</span></td>
+          <td class="num" style="color:${gapCor}">${ppSigned(c.gap)}</td>
+          <td class="num">${pp(c.projecao)}</td>
+          <td class="num">${c.faltam==null?'—':fmt(c.faltam)+' usuários'}</td>
+          <td><span class="pill ${st.cls}">${st.txt}</span></td>
+        </tr>`;
+      }).join('')}
+    `;
+    document.querySelectorAll('#tabelaPaceGrupos tr[data-grupo]').forEach(tr=>{
+      tr.addEventListener('click', ()=>{ sel.value = tr.dataset.grupo; render(tr.dataset.grupo); });
+    });
+  }
+
+  function render(grupo){
+    const b = P.grupos.find(x=>x.grupo===grupo) || P.grupos[0];
+    const c = calc(b);
+    const st = status(c.ratio);
+    dropCharts();
+
+    // ---- callout de leitura ----
+    let explic;
+    if (b.grupo==='Base inteira'){
+      explic = `<b>Como ler:</b> MAU aqui = % dos <b>${fmt(b.base_ativa)} usuários ativos</b> (status ativo na Waid) que concluíram pelo menos 1 aula no mês. O <b>pace esperado</b> não é linear: usa o ritmo médio de acúmulo do MAU nos últimos ${P.meses_curva.length} meses fechados (${P.meses_curva.map(mesLabel).join(', ')}) — até o dia ${d}, em média ${(c.curvaHoje*100).toFixed(0)}% do MAU do mês já tinha acontecido.`;
+    } else if (b.meta_origem==='manual'){
+      explic = `<b>Meta do grupo ${b.grupo}:</b> definida manualmente no arquivo <code>metas_mau_grupo.csv</code>. Base do grupo = ${fmt(b.base_ativa)} usuários ativos com acesso a ${b.grupo} (um usuário com vários grupos conta em cada um).`;
+    } else {
+      explic = `<b>Meta do grupo ${b.grupo}:</b> meta global × peso histórico do grupo. Nos meses ${P.meses_baseline.map(mesLabel).join(', ')} esse grupo teve MAU médio de ${pp(b.baseline_pct)}, contra ${pp(P.grupos[0].baseline_pct)} da base inteira → índice <b>${b.indice.toFixed(2).replace('.',',')}×</b>. Assim cada grupo precisa do mesmo crescimento relativo que a meta global pede. Base do grupo = ${fmt(b.base_ativa)} usuários ativos com acesso a ${b.grupo} (quem tem vários grupos conta em cada um).`;
+    }
+    if (b.amostra_pequena) explic += ` <b>Atenção:</b> grupo com menos de 30 usuários ativos — o percentual oscila muito com poucas pessoas.`;
+    if (d>0 && d<5) explic += ` <b>Início de mês:</b> com só ${d} dia(s) de dado, a projeção de fechamento ainda é pouco confiável.`;
+    if (c.meta==null) explic += ` <b>Sem meta cadastrada para ${mesLabel(P.mes)}</b> — inclua a linha no arquivo <code>metas_mau.csv</code>.`;
+    document.getElementById('pace-callout').innerHTML = explic;
+
+    // ---- KPIs ----
+    const projCor = c.projecao==null||c.meta==null ? 'gold' : (c.projecao>=c.meta ? 'green' : 'red');
+    const gapCls = c.gap==null ? '' : (c.gap>=0 ? 'green' : 'red');
+    document.getElementById('kpi-pace').innerHTML = `
+      <div class="card"><div class="kpi-label">Meta ${mesLabel(P.mes)}</div><div class="kpi-value gold">${pp(c.meta)}</div><div class="kpi-sub">${c.meta!=null?'≈ '+fmt(Math.ceil(c.meta/100*b.base_ativa))+' de '+fmt(b.base_ativa)+' usuários ativos':'Sem meta cadastrada'}</div></div>
+      <div class="card"><div class="kpi-label">Pace esperado (dia ${d})</div><div class="kpi-value">${pp(c.esperado)}</div><div class="kpi-sub">Onde deveríamos estar hoje para fechar na meta</div></div>
+      <div class="card"><div class="kpi-label">Realizado até ${dataBR(P.data_ref)}</div><div class="kpi-value">${pp(c.realizado)}</div><div class="kpi-sub">${fmt(c.realizadoN)} usuários com aula concluída no mês</div></div>
+      <div class="card"><div class="kpi-label">Gap vs. pace</div><div class="kpi-value ${gapCls}">${ppSigned(c.gap)}</div><div class="kpi-sub"><span class="pill ${st.cls}">${st.txt}</span>${c.ratio!=null?' · '+(c.ratio*100).toFixed(0)+'% do esperado':''}</div></div>
+      <div class="card"><div class="kpi-label">Projeção de fechamento</div><div class="kpi-value ${projCor}">${pp(c.projecao)}</div><div class="kpi-sub">Se o resto do mês seguir o ritmo histórico${c.meta!=null&&c.projecao!=null?' · '+ppSigned(c.projecao-c.meta)+' vs. meta':''}</div></div>
+      <div class="card"><div class="kpi-label">Faltam para a meta</div><div class="kpi-value">${c.faltam==null?'—':fmt(c.faltam)}</div><div class="kpi-sub">usuários novos ativos no mês até ${String(D).padStart(2,'0')}/${P.mes.slice(5)}</div></div>
+    `;
+
+    // ---- Gráfico do mês (dia a dia) ----
+    document.getElementById('pace-chart-sub').textContent = `${b.grupo} · % da base ativa acumulado no mês, dia a dia`;
+    const dias = Array.from({length:D}, (_,i)=>i+1);
+    const serieEsperado = c.meta!=null ? P.curva.map(f=>+(c.meta*f).toFixed(2)) : dias.map(()=>null);
+    const serieReal = dias.map(i=> i<=d ? b.diario[i-1] : null);
+    const serieProj = dias.map(i=> (d>0 && i>=d && c.curvaHoje>0) ? +Math.min(c.realizado/c.curvaHoje*P.curva[i-1],100).toFixed(2) : null);
+    const maxY = Math.max(c.meta||0, c.projecao||0, c.realizado||0);
+    paceCharts.push(mkChart(document.getElementById('chartPaceMes'), {
+      type:'line',
+      data:{ labels:dias.map(i=>`${String(i).padStart(2,'0')}/${P.mes.slice(5)}`), datasets:[
+        { label:'Pace esperado (meta × ritmo histórico)', data:serieEsperado, borderColor:COLORS.dim, borderDash:[6,4], borderWidth:2, pointRadius:0, pointHoverRadius:4, tension:0.2, fill:false, order:2 },
+        { label:'Realizado', data:serieReal, borderColor:COLORS.vivo, backgroundColor:'rgba(30,94,255,0.10)', borderWidth:2.5, pointRadius:dias.map(i=>i===d?5:0), pointHoverRadius:5, pointBackgroundColor:COLORS.vivo, tension:0.2, fill:true, order:0 },
+        { label:'Projeção (se seguir o ritmo histórico)', data:serieProj, borderColor:COLORS.vivo, borderDash:[3,4], borderWidth:2, pointRadius:dias.map(i=>i===D?5:0), pointHoverRadius:4, pointBackgroundColor:'#fff', pointBorderColor:COLORS.vivo, tension:0.2, fill:false, order:1 },
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, layout:{padding:{top:22, right:96}},
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{display:true, position:'bottom', labels:{boxWidth:10}},
+          tooltip:{callbacks:{label:t=> t.parsed.y==null ? null : `${t.dataset.label}: ${pp(t.parsed.y)}`}},
+          datalabels:{ display:ctx=>{
+              const i = ctx.dataIndex;
+              if (ctx.datasetIndex===0) return i===D-1 && c.meta!=null;
+              if (ctx.datasetIndex===1) return i===d-1;
+              return i===D-1 && d>0;
+            },
+            align:'right', offset:6, clip:false, font:{size:11, weight:'700'},
+            color:getComputedStyle(document.body).getPropertyValue('--ink').trim()||'#0B1E3D',
+            formatter:(v,ctx)=> ctx.datasetIndex===0 ? 'Meta '+pp(v) : (ctx.datasetIndex===2 ? 'Proj. '+pp(v) : pp(v)) }
+        },
+        scales:{ y:{beginAtZero:true, suggestedMax:maxY*1.15||10, ticks:{callback:v=>v+'%'}, grid:{color:'rgba(11,45,110,0.06)'}},
+                 x:{grid:{display:false}, ticks:{maxTicksLimit:16, maxRotation:0}} } }
+    }));
+
+    // ---- Gráfico mensal (meta x realizado) ----
+    const histMap = Object.fromEntries(b.historico.map(h=>[h.mes,h]));
+    const fechados = b.historico.map(h=>h.mes).filter(m=>m<P.mes).slice(-6);
+    const futuros = Array.from({length:5}, (_,i)=>addMes(P.mes,i+1));
+    const meses = [...fechados, P.mes, ...futuros];
+    const realM = meses.map(m=> histMap[m] ? histMap[m].pct : null);
+    const metaM = meses.map(m=> b.metas && b.metas[m]!=null ? b.metas[m] : null);
+    const projM = meses.map(m=> m===P.mes ? c.projecao : null);
+    const idxAtual = meses.indexOf(P.mes);
+    paceCharts.push(mkChart(document.getElementById('chartPaceMensal'), {
+      type:'bar',
+      data:{ labels:meses.map(m=> m===P.mes ? mesLabel(m)+' (parcial)' : mesLabel(m)), datasets:[
+        { type:'bar', label:'Realizado', data:realM, backgroundColor:meses.map((m,i)=> i===idxAtual ? 'rgba(30,94,255,0.45)' : COLORS.vivo), borderRadius:4, maxBarThickness:42, order:2 },
+        { type:'bar', label:'Projeção do mês atual', data:projM, backgroundColor:'transparent', borderColor:COLORS.vivo, borderWidth:2, borderDash:[4,3], borderRadius:4, maxBarThickness:42, order:3, grouped:false },
+        { type:'line', label:'Meta', data:metaM, borderColor:'#D97706', backgroundColor:'#D97706', borderWidth:2, pointRadius:4, pointHoverRadius:6, spanGaps:false, tension:0, order:1 },
+      ]},
+      options:{ responsive:true, maintainAspectRatio:false, layout:{padding:{top:24}},
+        interaction:{mode:'index', intersect:false},
+        plugins:{
+          legend:{display:true, position:'bottom', labels:{boxWidth:10}},
+          tooltip:{callbacks:{label:t=> t.parsed.y==null ? null : `${t.dataset.label}: ${pp(t.parsed.y)}`}},
+          datalabels:{ display:ctx=> ctx.datasetIndex===0 && ctx.dataset.data[ctx.dataIndex]!=null,
+            anchor:'end', align:'top', offset:2, font:{size:10.5, weight:'600'},
+            color:getComputedStyle(document.body).getPropertyValue('--ink').trim()||'#0B1E3D', formatter:v=>pp(v) }
+        },
+        scales:{ y:{beginAtZero:true, ticks:{callback:v=>v+'%'}, grid:{color:'rgba(11,45,110,0.06)'}}, x:{grid:{display:false}} } }
+    }));
+
+    renderTabela(b.grupo);
+  }
+
+  sel.onchange = ()=>render(sel.value); // onchange (não addEventListener): boot() pode rodar 2x
+  render(P.grupos[0].grupo);
+})();
 
 // ================= CONSUMO POR GRUPO (mini-gráficos de linha, dual-eixo) =================
 let groupCharts = []; // guarda instâncias pra destruir ao trocar de período
@@ -692,6 +908,7 @@ document.getElementById('notas-metodologia').innerHTML = `
   <li><b>Grupo do conteúdo</b>: cruzamento pelo título exato da aula com a Biblioteca PAI (abas de Sessões, Notas e Programas). ${DATA.meta.aviso_grupo}</li>
   <li><b>Ao Vivo vs. Gravado</b>: uma aula é "Ao Vivo" se o título aparece na planilha de Consumos Zoom; caso contrário, "Gravado".</li>
   <li><b>MAU</b>: e-mails únicos com pelo menos uma conclusão de aula no mês. O mês corrente (${DATA.meta.mes_parcial}) está parcial (dados até 17/09) e foi excluído das análises de tendência para não distorcer a leitura.</li>
+  <li><b>PACE de MAU</b>: % dos usuários ativos hoje (status ativo na Waid) que concluíram ao menos 1 aula no mês, contado até o fim do dia anterior. Pace esperado = meta do mês × fração do MAU que historicamente já aconteceu até aquele dia (média dos últimos meses fechados). Projeção = realizado ÷ essa fração. Status: ▲ no ritmo (≥ 100% do esperado), ● atenção (90–99%), ▼ abaixo (&lt; 90%). Metas globais em <code>metas_mau.csv</code>; meta por grupo de acesso = meta global × peso histórico do grupo, ou manual em <code>metas_mau_grupo.csv</code>.</li>
   <li><b>Dormência</b>: baseada na última data de conclusão de aula registrada (não há evento de "login" separado nos dados enviados); considera apenas usuários ativos na Waid hoje.</li>
   <li><b>Empresas Ativas</b>: todos os clientes com contrato ativo hoje; percentual de MAU sobre o total de usuários da conta ativos no último mês fechado (Ago/2026).</li>
   <li><b>TTFV</b>: dias entre a data de criação do usuário e a primeira conclusão de aula registrada (excluídos casos negativos ou acima de 365 dias, tratados como outlier de dado).</li>

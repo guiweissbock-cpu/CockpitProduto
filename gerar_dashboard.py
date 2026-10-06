@@ -142,7 +142,9 @@ def _supabase_fetch(table, select="*", page_size=1000):
     return pd.DataFrame(rows)
 
 
-TODAY = pd.Timestamp.today().normalize()
+# DASHBOARD_HOJE=AAAA-MM-DD permite simular outra data de referencia (teste local).
+TODAY = (pd.Timestamp(os.environ["DASHBOARD_HOJE"]) if os.environ.get("DASHBOARD_HOJE")
+         else pd.Timestamp.today()).normalize()
 MES_ATUAL = TODAY.strftime("%Y-%m")
 # ultimo mes fechado = mes anterior ao mes corrente
 ULTIMO_MES_FECHADO = (TODAY.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")
@@ -630,6 +632,190 @@ def mau_por_grupo(cp):
 
 
 # ---------------------------------------------------------------
+# 5c. PACE DE MAU (meta x realizado, global e por grupo de acesso)
+# ---------------------------------------------------------------
+# Metrica do PACE: % da base ativa (usuarios.status = true) que concluiu
+# pelo menos 1 aula no mes. Numerador e denominador sao a MESMA populacao
+# (so usuarios ativos), o que permite abrir por grupo de acesso sem
+# distorcer. Obs.: e um pouco diferente do card antigo "MAU % da base
+# ativa", que soma no numerador quem ja esta inativo hoje.
+#
+# Metas:
+#   metas_mau.csv        -> mes (AAAA-MM), meta_mau_pct   (meta global)
+#   metas_mau_grupo.csv  -> mes, grupo, meta_mau_pct      (OPCIONAL: meta manual
+#                           por grupo; se nao existir, a meta do grupo e
+#                           calculada automaticamente -- ver _meta_grupo abaixo)
+GRUPOS_ACESSO = ["Full Pass", "Pré-Vendas", "Executivos", "Gestão", "Canais", "Class", "Sem Grupo de Acesso"]
+PACE_MESES_CURVA = 6      # quantos meses fechados formam a curva "normal" de acumulo do MAU no mes
+PACE_MESES_BASELINE = 3   # quantos meses fechados definem o "peso" historico de cada grupo
+PACE_AMOSTRA_MIN = 30     # abaixo disso o grupo e sinalizado como amostra pequena
+
+
+def _norm_grupo_acesso(parte):
+    p = parte.strip().lower()
+    if not p:
+        return None
+    if "full" in p:
+        return "Full Pass"
+    if "pré-venda" in p or "pre-venda" in p or "pré venda" in p or "pre venda" in p:
+        return "Pré-Vendas"
+    if "execut" in p:
+        return "Executivos"
+    if "gest" in p:
+        return "Gestão"
+    if "canal" in p or "canais" in p:
+        return "Canais"
+    if "class" in p:
+        return "Class"
+    if "sem grupo" in p:
+        return "Sem Grupo de Acesso"
+    return parte.strip()
+
+
+def grupos_acesso_do_usuario(valor):
+    if not isinstance(valor, str) or not valor.strip():
+        return ["Sem Grupo de Acesso"]
+    gs = []
+    for parte in valor.split(","):
+        g = _norm_grupo_acesso(parte)
+        if g and g not in gs:
+            gs.append(g)
+    return gs or ["Sem Grupo de Acesso"]
+
+
+def _ler_metas():
+    globais, por_grupo = {}, {}
+    p = DATA / "metas_mau.csv"
+    if p.exists():
+        m = pd.read_csv(p, dtype={"mes": str})
+        globais = {str(r.mes).strip(): float(r.meta_mau_pct) for r in m.itertuples() if pd.notna(r.meta_mau_pct)}
+    p = DATA / "metas_mau_grupo.csv"
+    if p.exists():
+        m = pd.read_csv(p, dtype={"mes": str})
+        for r in m.itertuples():
+            if pd.notna(r.meta_mau_pct):
+                g = _norm_grupo_acesso(str(r.grupo)) or str(r.grupo)
+                por_grupo.setdefault(g, {})[str(r.mes).strip()] = float(r.meta_mau_pct)
+    return globais, por_grupo
+
+
+def _curva_pace(dias_por_mes_ativos, meses, dias_mes_atual):
+    """Curva media de acumulo do MAU dentro do mes: para cada mes fechado,
+    % do MAU final que ja tinha sido atingido em cada fracao do mes. Dias
+    diferentes (28/30/31) sao alinhados pela fracao do mes decorrida. Retorna
+    uma lista de tamanho dias_mes_atual com a fracao esperada ao fim de cada dia."""
+    alvo = np.arange(1, dias_mes_atual + 1) / dias_mes_atual
+    curvas = []
+    for mes in meses:
+        primeiro_dia = dias_por_mes_ativos.get(mes)
+        if primeiro_dia is None or len(primeiro_dia) == 0:
+            continue
+        n_dias = pd.Period(mes).days_in_month
+        contagem = np.bincount(primeiro_dia.values, minlength=n_dias + 1)[1:n_dias + 1]
+        acum = np.cumsum(contagem) / contagem.sum()
+        t = np.arange(1, n_dias + 1) / n_dias
+        curvas.append(np.interp(alvo, np.concatenate([[0], t]), np.concatenate([[0], acum])))
+    if not curvas:
+        return list(alvo)  # sem historico: assume ritmo linear
+    curva = np.mean(curvas, axis=0)
+    curva[-1] = 1.0
+    return [round(float(x), 4) for x in curva]
+
+
+def mau_pace(cp, usuarios):
+    metas_globais, metas_manuais = _ler_metas()
+
+    ativos = usuarios[usuarios["usuario_ativo"]].drop_duplicates(subset="email").copy()
+    ativos["grupos"] = ativos["grupo_acesso"].apply(grupos_acesso_do_usuario)
+    email_grupos = ativos.set_index("email")["grupos"].to_dict()
+
+    # consumo so de quem e da base ativa, ate o fim de ONTEM (o dia de hoje
+    # ainda esta em andamento e distorceria a comparacao com a curva)
+    c = cp.dropna(subset=["Email"])
+    c = c[c["Email"].isin(email_grupos.keys()) & (c["data"] < TODAY)][["Email", "data", "mes"]].copy()
+    c["dia"] = c["data"].dt.day
+
+    ref = TODAY - pd.Timedelta(days=1)
+    mes_pace = MES_ATUAL
+    dias_mes = pd.Period(mes_pace).days_in_month
+    dia_ref = TODAY.day - 1  # dias completos do mes corrente
+
+    # primeiro dia de atividade de cada usuario em cada mes
+    primeiro = c.groupby(["mes", "Email"])["dia"].min().reset_index()
+
+    meses_fechados = sorted(m for m in primeiro["mes"].unique() if m < mes_pace)
+    meses_curva = meses_fechados[-PACE_MESES_CURVA:]
+    curva = _curva_pace(
+        {m: primeiro.loc[primeiro["mes"] == m, "dia"] for m in meses_curva}, meses_curva, dias_mes
+    )
+
+    meses_hist = meses_fechados[-12:] + [mes_pace]
+    base_meses_baseline = meses_fechados[-PACE_MESES_BASELINE:]
+
+    def serie(emails_grupo, base):
+        prim = primeiro[primeiro["Email"].isin(emails_grupo)]
+        hist = []
+        for m in meses_hist:
+            n = int((prim["mes"] == m).sum())
+            hist.append({"mes": m, "mau": n, "pct": round(n / base * 100, 2) if base else None})
+        atual = prim.loc[prim["mes"] == mes_pace, "dia"]
+        cont = np.bincount(atual.values, minlength=dias_mes + 1)[1:dias_mes + 1]
+        acum = np.cumsum(cont)[:max(dia_ref, 0)]
+        diario = [round(float(x) / base * 100, 2) if base else None for x in acum]
+        diario_n = [int(x) for x in acum]
+        baseline = [h["pct"] for h in hist if h["mes"] in base_meses_baseline and h["pct"] is not None]
+        return hist, diario, diario_n, (float(np.mean(baseline)) if baseline else None)
+
+    blocos = []
+    todos = set(email_grupos.keys())
+    hist_t, diario_t, diario_n_t, baseline_t = serie(todos, len(todos))
+    blocos.append({
+        "grupo": "Base inteira", "base_ativa": len(todos), "indice": 1.0,
+        "amostra_pequena": False, "meta_origem": "global",
+        "metas": dict(metas_globais), "historico": hist_t, "diario": diario_t,
+        "diario_n": diario_n_t, "baseline_pct": round(baseline_t, 2) if baseline_t else None,
+    })
+
+    for g in GRUPOS_ACESSO:
+        emails_g = {e for e, gs in email_grupos.items() if g in gs}
+        base_g = len(emails_g)
+        if base_g == 0:
+            continue
+        hist_g, diario_g, diario_n_g, baseline_g = serie(emails_g, base_g)
+        # Meta automatica do grupo: aplica sobre a meta global o "peso" historico
+        # do grupo (MAU% medio do grupo / MAU% medio da base nos ultimos meses
+        # fechados). Grupo que historicamente engaja acima da media tem meta
+        # proporcionalmente maior, e vice-versa -- todos precisam do MESMO
+        # crescimento relativo que a meta global pede.
+        indice = (baseline_g / baseline_t) if (baseline_g is not None and baseline_t) else 1.0
+        metas_g = {m: round(min(v * indice, 100.0), 1) for m, v in metas_globais.items()}
+        origem = "automática"
+        if g in metas_manuais:
+            metas_g.update(metas_manuais[g])
+            origem = "manual"
+        blocos.append({
+            "grupo": g, "base_ativa": base_g, "indice": round(indice, 3),
+            "amostra_pequena": base_g < PACE_AMOSTRA_MIN, "meta_origem": origem,
+            "metas": metas_g, "historico": hist_g, "diario": diario_g, "diario_n": diario_n_g,
+            "baseline_pct": round(baseline_g, 2) if baseline_g is not None else None,
+        })
+
+    print(f"  (PACE MAU: {mes_pace}, dia {dia_ref}/{dias_mes}, curva de {len(meses_curva)} meses, "
+          f"base ativa {len(todos)}, {len(blocos) - 1} grupos de acesso, "
+          f"{len(metas_globais)} metas globais)")
+    return {
+        "mes": mes_pace,
+        "dias_no_mes": dias_mes,
+        "dia_ref": dia_ref,
+        "data_ref": ref.strftime("%Y-%m-%d"),
+        "curva": curva,
+        "meses_curva": meses_curva,
+        "meses_baseline": base_meses_baseline,
+        "grupos": blocos,
+    }
+
+
+# ---------------------------------------------------------------
 # 6. REVIEWS
 # ---------------------------------------------------------------
 def load_reviews(mapping):
@@ -975,6 +1161,7 @@ def main():
 
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, mau_mes_ativos, volume_medio = agregacoes_consumo(cp)
     mau_grupo_mes = mau_por_grupo(cp)
+    pace = mau_pace(cp, usuarios)
     nota_grupo, reviews_detalhe = load_reviews(mapping)
     nota_grupo_vivo, reviews_detalhe_vivo = load_csat_ao_vivo()
     nota_grupo_combinado = pd.concat([nota_grupo, nota_grupo_vivo], ignore_index=True)
@@ -1030,6 +1217,7 @@ def main():
         "mau_mes": mau_mes_list,
         "mau_grupo_mes": mau_grupo_mes.to_dict("records"),
         "mau_resumo": mau_resumo,
+        "mau_pace": pace,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
         "nota_grupo_vivo": nota_grupo_vivo.to_dict("records"),
