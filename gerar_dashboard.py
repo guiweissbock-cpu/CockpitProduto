@@ -830,8 +830,9 @@ def load_reviews(mapping):
     nota_grupo["tipo"] = "Gravado"
 
     # detalhe individual, para a tabela de nota + grupo + comentario qualitativo
-    detalhe = rv[["Aluno", "Curso", "grupo", "Avaliação", "Mensagem", "Data da Avaliação"]].copy()
-    detalhe.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data"]
+    rv["Email"] = rv["Email"].astype(str).str.strip().str.lower() if "Email" in rv.columns else ""
+    detalhe = rv[["Aluno", "Curso", "grupo", "Avaliação", "Mensagem", "Data da Avaliação", "Email"]].copy()
+    detalhe.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data", "email"]
     detalhe["comentario"] = detalhe["comentario"].fillna("")
     detalhe["tipo"] = "Gravado"
     detalhe = detalhe.sort_values("nota", ascending=True)
@@ -936,7 +937,7 @@ def load_csat_ao_vivo():
 
     if not partes:
         return pd.DataFrame(columns=["grupo", "nota_media", "qtd_avaliacoes", "tipo"]), pd.DataFrame(
-            columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo"]
+            columns=["aluno", "curso", "grupo", "nota", "comentario", "data", "tipo", "email"]
         )
 
     rv = pd.concat(partes, ignore_index=True)
@@ -947,8 +948,9 @@ def load_csat_ao_vivo():
     nota_grupo_vivo["nota_media"] = nota_grupo_vivo["nota_media"].round(2)
     nota_grupo_vivo["tipo"] = "Ao Vivo"
 
-    detalhe_vivo = rv[["nome_resposta", "topico", "grupo", "nota_geral", "comentario_critica", "data_envio"]].copy()
-    detalhe_vivo.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data"]
+    rv["email"] = rv["email"].astype(str).str.strip().str.lower()
+    detalhe_vivo = rv[["nome_resposta", "topico", "grupo", "nota_geral", "comentario_critica", "data_envio", "email"]].copy()
+    detalhe_vivo.columns = ["aluno", "curso", "grupo", "nota", "comentario", "data", "email"]
     detalhe_vivo["comentario"] = detalhe_vivo["comentario"].fillna("")
     detalhe_vivo["aluno"] = detalhe_vivo["aluno"].fillna("—")
     detalhe_vivo["tipo"] = "Ao Vivo"
@@ -1255,11 +1257,34 @@ def main():
     }
     master = clean_json(master)
 
+    # ---- abas do Cockpit (faróis, alertas e insights) -> paineis.py ----
+    import re as _re
+    import traceback
+    import paineis
+    try:
+        extras = paineis.calcular_extras(cp, usuarios, contas, TODAY, MES_ATUAL, ULTIMO_MES_FECHADO)
+        rev_rows = paineis.reviews_com_acesso(reviews_detalhe, reviews_detalhe_vivo, usuarios, grupos_acesso_do_usuario)
+        pedacos = paineis.montar(master, extras, rev_rows)
+    except Exception:
+        # Nunca deixa o painel sem publicar: mostra o erro no lugar das abas e segue.
+        erro = traceback.format_exc()
+        print("  ERRO ao montar as abas (paineis.py):\n" + erro)
+        aviso = ('<div class="callout"><b>Esta aba não pôde ser montada nesta atualização.</b> '
+                 'O erro completo está no log do GitHub Actions (passo "Gerar dashboard").</div>')
+        chaves = set(_re.findall(r"\{\{([A-Z_]+)\}\}", TEMPLATE.read_text(encoding="utf-8")))
+        pedacos = {k: aviso for k in chaves}
+        pedacos.update({"REV": "[]", "DLIST": "[]", "RESUMO": "não foi possível calcular os faróis nesta atualização.",
+                        "NBAD": "0", "NWARN": "0", "NOK": "0"})
+        pedacos.update({k: "info" for k in chaves if k.startswith("SD_")})
+
     template = TEMPLATE.read_text(encoding="utf-8")
-    html = template.replace("__DATA_PLACEHOLDER__", json.dumps(master, ensure_ascii=False))
-    html = html.replace(
-        "17 de setembro de 2026", TODAY.strftime("%d/%m/%Y")
-    )
+    # No HTML vai so o que o JavaScript usa (PACE); o resto ja chega pronto em HTML.
+    dados_js = clean_json({"mau_pace": master.get("mau_pace"), "meta": master["meta"]})
+    html = template.replace("__DATA_PLACEHOLDER__", json.dumps(dados_js, ensure_ascii=False))
+    pedacos["DATA"] = TODAY.strftime("%d/%m/%Y")
+    for chave, valor in pedacos.items():
+        html = html.replace("{{" + chave + "}}", valor)
+    html = html.replace("\ufffd", "?")  # texto que ja chega corrompido da origem
     OUTPUT.write_text(html, encoding="utf-8")
     print(f"OK -> {OUTPUT} ({len(html):,} bytes)")
 
