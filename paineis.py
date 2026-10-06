@@ -388,6 +388,12 @@ def montar(d, ex, rev_rows):
     ph["ATENCAO"] = "".join(aten) or item("ok", "Nenhum ponto crítico pelas regras atuais.")
     ph["BEM"] = "".join(bem) or item("info", "Nada se destacou positivamente neste mês.")
     ph["FAROIS"] = farois
+    ct, us = d["contas"], d["usuarios"]
+    card = lambda lab, val, sub, cls="": f'<div class="card"><div class="kpi-label">{lab}</div><div class="kpi-value {cls}">{val}</div><div class="kpi-sub">{sub}</div></div>'
+    ph["BASE"] = (card("Contas ativas hoje", ni(ct["ativas"]), f"{br(ct['ativas'] / ct['total'] * 100)}% de {ni(ct['total'])} contas", "green")
+                  + card("Contas inativas", ni(ct["inativas"]), "sem contrato vigente", "red")
+                  + card("Usuários ativos hoje", ni(us["ativos"]), f"{br(us['ativos'] / us['total'] * 100)}% de {ni(us['total'])} usuários · ativos na Waid", "green")
+                  + card("Usuários inativos", ni(us["inativos"]), "inativos na Waid", "red"))
     ph["NBAD"], ph["NWARN"], ph["NOK"] = str(n_bad), str(n_warn), str(n_ok)
     resumo = []
     if proj and meta:
@@ -400,9 +406,13 @@ def montar(d, ex, rev_rows):
     # ============== ABA MAU & RETENÇÃO ==============
     serie = [r for r in d["mau_mes"] if r["mes"] <= d["meta"]["mes_parcial"]][-13:]
     ms = [r["mes"] for r in serie]
-    graf = linechart(ms, [("Só ativos hoje", "var(--blue)", [r["pct_ativos"] for r in serie]),
-                          ("Com quem saiu depois", "var(--teal)", [r["pct_todos"] for r in serie])],
-                     parcial=d["meta"]["mes_parcial"])
+    dados_mau = dict(labels=[ml(m) + ("*" if m == d["meta"]["mes_parcial"] else "") for m in ms],
+                     ativos=[round(r["pct_ativos"], 2) for r in serie], todos=[round(r["pct_todos"], 2) for r in serie],
+                     n_ativos=[r["mau_ativos"] for r in serie], base_ativos=[ativos for _ in serie],
+                     n_todos=[r["mau"] for r in serie], base_todos=[ativos + max(r["mau"] - r["mau_ativos"], 0) for r in serie],
+                     parcial=ms[-1] == d["meta"]["mes_parcial"])
+    graf = ('<div class="chart-wrap tall"><canvas id="mauCanvas"></canvas></div>'
+            f'<script type="application/json" id="mauDados">{json.dumps(dados_mau)}</script>')
     coh_rows = ""
     offs = range(0, 7)
     for r in d["cohort_retencao"]:
@@ -418,25 +428,25 @@ def montar(d, ex, rev_rows):
                 alpha = min(v / 70, 1) * 0.35
                 cells += f'<td class="n" style="background:rgba(30,94,255,{alpha:.2f})">{br(v, 0)}%</td>'
         coh_rows += f'<tr><td>{ml(r["cohort"])}</td><td class="n">{ni(r["tamanho"])}</td>{cells}</tr>'
+    volm = pd.DataFrame(d["consumo_mes"]).groupby("mes")["aulas_assistidas"].sum()
+    vol_u, vol_a = float(volm.get(ult, 0)), float(volm.get(ant, 0))
+    var_vol = (vol_u / vol_a - 1) * 100 if vol_a else None
+    st_vol = "info" if var_vol is None else ("ok" if var_vol >= 0 else ("warn" if var_vol > -15 else "bad"))
+    vol_s = [float(volm.get(m, 0)) for m in [r["mes"] for r in mm]]
     fr = ex["frequencia"]
     fr_m = list(fr)
     cn = ex["conteudo_novo"]
     cn_m = list(cn)
     k_mau = "".join([
-        farol(st_mau, "MAU (só ativos hoje)", f"{br(mpct[-1])}%", f"{ml(mm[-1]['mes'])}. Média 12 meses: {br(np.mean(mpct))}%.", seta(dm) + " vs. mês anterior" if dm is not None else "", spark(mpct)),
-        farol("info", "MAU (com quem saiu depois)", f"{br(mm[-1]['pct_todos'])}%", "Inclui quem assistiu no mês e depois foi inativado na Waid. Não perde o histórico.", "", spark([r["pct_todos"] for r in mm], col="var(--teal)")),
-        farol("info" if not fr_m else ("ok" if len(fr_m) < 2 or fr[fr_m[-1]] >= fr[fr_m[-2]] else "warn"), "Frequência",
-              f"{br(fr[fr_m[-1]], 2)} dias" if fr_m else "—", "Dias distintos com aula concluída, em média, por usuário que consumiu no mês.",
-              seta(fr[fr_m[-1]] - fr[fr_m[-2]], 2, " dias") + " vs. mês anterior" if len(fr_m) >= 2 else "", spark([fr[m] for m in fr_m])),
-        farol("info", "Peso do conteúdo novo", f"{br(cn[cn_m[-1]], 0)}%" if cn_m else "—",
-              "Conclusões do mês em aulas que apareceram pela 1ª vez no consumo nos últimos 90 dias.",
-              seta(cn[cn_m[-1]] - cn[cn_m[-2]], 0) + " vs. mês anterior" if len(cn_m) >= 2 else "", spark([cn[m] for m in cn_m])),
+        farol(st_mau, f"MAU (só ativos hoje) · {ml(mm[-1]['mes'])}", f"{br(mpct[-1])}%", f"{ml(mm[-1]['mes'])}. Média 12 meses: {br(np.mean(mpct))}%.", seta(dm) + " vs. mês anterior" if dm is not None else "", spark(mpct)),
+        farol("info", f"MAU (com quem saiu depois) · {ml(mm[-1]['mes'])}", f"{br(mm[-1]['pct_todos'])}%", "Inclui quem assistiu no mês e depois foi inativado na Waid. Não perde o histórico.", seta(mm[-1]['pct_todos'] - mm[-2]['pct_todos']) + " vs. mês anterior" if len(mm) >= 2 else "", spark([r["pct_todos"] for r in mm], col="var(--teal)")),
         farol("info", "Tempo até a 1ª aula (TTFV)", f"{br(d['ttfv']['mediana_dias'], 0)} dias", f"Mediana entre cadastro e 1ª aula (n={ni(d['ttfv']['amostra'])}). Média: {br(d['ttfv']['media_dias'])} dias."),
-        farol("info", "Volume de aulas por mês", ni(d["volume_medio"]["media_aulas_por_mes"]), f"Média de {d['volume_medio']['periodo']}. {br(d['volume_medio']['media_aulas_por_usuario_mes'])} aulas por usuário ativo.")])
+        farol(st_vol, f"Aulas concluídas · {ml(ult)}", ni(vol_u), f"Média dos últimos 12 meses fechados: {ni(d['volume_medio']['media_aulas_por_mes'])} aulas/mês.",
+              seta(var_vol, 0, "%") + f" vs. {ml(ant)} ({ni(vol_a)})", spark(vol_s))])
     at_rows = "".join(f'<tr><td>{ml(m)}</td><td class="n">{ni(v["n"])}</td><td class="n"><b>{br(v["pct"])}%</b></td></tr>' for m, v in at.items())
     ph["MAU"] = (f'<div class="farois">{k_mau}</div>'
                  f'<div class="sec"><h2>MAU % mês a mês — duas leituras</h2><span class="n">azul: só quem está ativo na Waid hoje (mesma base do PACE) · verde: inclui quem assistiu e depois saiu · * mês em andamento</span></div>'
-                 f'<div class="box">{graf}<div class="legend"><span><i style="background:var(--blue)"></i>Só ativos hoje</span><span><i style="background:var(--teal)"></i>Com quem saiu depois</span></div></div>'
+                 f'<div class="box">{graf}<p class="note">Passe o mouse sobre o mês para ver quantas pessoas assistiram. Linha tracejada = mês em andamento.</p></div>'
                  f'<div class="cols" style="margin-top:12px"><div class="box tbl"><h3>Retenção por coorte de ativação</h3><table><tr><th>Coorte</th><th class="n">Tamanho</th>{"".join(f"<th class=n>M+{o}</th>" for o in offs)}</tr>{coh_rows}</table>'
                  f'<p class="note">Coorte = mês da 1ª aula concluída. Células com * usam o mês corrente, que ainda não fechou — não compare com as outras.</p></div>'
                  f'<div class="box tbl"><h3>Ativação em 30 dias por mês de cadastro</h3><table><tr><th>Cadastro</th><th class="n">Usuários</th><th class="n">1ª aula em até 30 dias</th></tr>{at_rows}</table>'
@@ -534,7 +544,7 @@ def _consumo(d, ex, ult, ant):
              f'<p class="note">Status: ▼ crítico se os usuários do mês estão 15%+ abaixo da média de 3 meses; ● atenção se 5–15% abaixo. “Aulas por usuário” mede profundidade.</p>'
              f'<div class="cols" style="margin-top:12px"><div class="box tbl"><h3>{chip("ok", "Em alta")} Aulas que mais ganharam usuários</h3><table>{cab}{"".join(linha(r) for r in ex["alta"]) or "<tr><td class=muted>—</td></tr>"}</table></div>'
              f'<div class="box tbl"><h3>{chip("bad", "Em queda")} Aulas que mais perderam usuários</h3><table>{cab}{"".join(linha(r) for r in ex["queda"]) or "<tr><td class=muted>—</td></tr>"}</table></div></div>'
-             f'<p class="note">Peso do conteúdo novo em {ml(ult)}: <b>{br(cn.get(ult), 0)}%</b> das conclusões vieram de aulas que apareceram pela 1ª vez nos últimos 90 dias (detalhe na aba MAU & Retenção).</p>')
+             '')
     return html_, pior(sts)
 
 
@@ -564,11 +574,11 @@ def _contas(d, ex, C, ult):
     saud = int((sc["score"] >= 70).sum())
     aten = int(((sc["score"] >= 40) & (sc["score"] < 70)).sum())
     risc = int((sc["score"] < 40).sum())
-    piores = sc.sort_values(["score", "ativos"], ascending=[True, False]).head(15)
+    piores = sc.sort_values(["score", "ativos"], ascending=[True, False])
     pr = "".join(
         f'<tr><td>{esc(r.nome)}</td><td>{esc(r.csm)}</td><td class="n">{ni(r.ativos)}</td><td class="n">{br(r.mau_ativos)}%</td>'
         f'<td class="n">{br(r.mau_3m)}%</td><td class="n">{"—" if r.dias is None or pd.isna(r.dias) else ni(r.dias)}</td><td class="n">{br(r.ativacao, 0)}%</td>'
-        f'<td class="n"><b class="{"down" if r.score < 40 else ""}">{ni(r.score)}</b></td></tr>' for r in piores.itertuples())
+        f'<td class="n"><b class="{"down" if r.score < 40 else ("up" if r.score >= 70 else "")}">{ni(r.score)}</b></td></tr>' for r in piores.itertuples())
     caiu = sc[(sc["mau_3m"].notna()) & (sc["ativos"] >= 5)].assign(d=lambda t: t["mau_ativos"] - t["mau_3m"]).sort_values("d").head(10)
     cr = "".join(f'<tr><td>{esc(r.nome)}</td><td>{esc(r.csm)}</td><td class="n">{ni(r.ativos)}</td><td class="n">{br(r.mau_3m)}%</td><td class="n"><b>{br(r.mau_ativos)}%</b></td><td class="n">{seta(r.d, 0)}</td></tr>' for r in caiu.itertuples() if r.d < 0)
     ref = Cv[Cv["ativos"] >= 10].sort_values("mau_ativos", ascending=False).head(8)
@@ -593,8 +603,9 @@ def _contas(d, ex, C, ult):
         f'<th class="n">Contas &lt; 25%</th><th class="n">Usuários em risco</th><th class="n">Saúde média</th><th>Status</th></tr>{rows}</table>'
         f'<p class="note"><b>MAU (ativos)</b> = usuários ativos na Waid hoje que concluíram 1+ aula em {ml(ult)} ÷ usuários ativos hoje — mesma base do PACE. '
         '<b>MAU (com quem saiu)</b> soma no numerador e no denominador quem assistiu no mês e depois foi inativado, para o histórico não cair só porque a base foi limpa.</p></div>'
-        '<div class="sec"><h2>Saúde da conta — piores notas</h2><span class="n">MAU 40 pts · tendência vs. 3 meses 20 pts · dias desde o último consumo 20 pts · % de ativos que já assistiram 20 pts</span></div>'
-        '<div class="box tbl"><table><tr><th>Conta</th><th>CSM</th><th class="n">Ativos</th><th class="n">MAU</th><th class="n">MAU 3m</th><th class="n">Dias sem consumo</th><th class="n">Já assistiram</th><th class="n">Nota</th></tr>'
+        '<div class="sec"><h2>Saúde da conta — todas as contas</h2><span class="n">MAU 40 pts · tendência vs. 3 meses 20 pts · dias desde o último consumo 20 pts · % de ativos que já assistiram 20 pts</span></div>'
+        f'<div class="filters"><label for="sBusca">Buscar<input id="sBusca" type="search" placeholder="Conta ou CSM"></label><span class="hint">{len(sc)} contas com 3+ usuários ativos · da pior para a melhor nota</span></div>'
+        '<div class="box tbl list-scroll"><table id="sTab"><tr><th>Conta</th><th>CSM</th><th class="n">Ativos</th><th class="n">MAU</th><th class="n">MAU 3m</th><th class="n">Dias sem consumo</th><th class="n">Já assistiram</th><th class="n">Nota</th></tr>'
         f'{pr}</table><p class="note">Hoje uma conta para de consumir, em mediana, {br(d["lead_time_churn"]["mediana_dias"], 0)} dias antes do churn — a nota antecipa esse sinal.</p></div>'
         f'<div class="cols" style="margin-top:12px"><div class="box tbl"><h3>{chip("bad", "Piorou")} Maiores quedas vs. média de 3 meses</h3><table><tr><th>Conta</th><th>CSM</th><th class="n">Ativos</th><th class="n">MAU 3m</th><th class="n">MAU</th><th class="n">Var.</th></tr>{cr or "<tr><td class=muted>—</td></tr>"}</table></div>'
         f'<div class="box tbl"><h3>{chip("ok", "Referência")} Contas com 10+ ativos e maior MAU</h3><table><tr><th>Conta</th><th>CSM</th><th class="n">Ativos</th><th class="n">MAU</th></tr>{rf}</table></div></div>')

@@ -150,6 +150,8 @@ tr:last-child td{border-bottom:0}
 #tabelaPaceGrupos tr.sel td{background:var(--panel-2);font-weight:600}
 #tabelaPaceGrupos td.num,#tabelaPaceGrupos th.num{text-align:right;font-variant-numeric:tabular-nums}
 td.parcial{color:var(--muted);font-style:italic}
+.base-strip{margin-bottom:6px}
+.base-strip .card .kpi-value{font-size:24px}
 .toplist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .toplist li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:baseline}
 .toplist .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
@@ -194,6 +196,7 @@ td.parcial{color:var(--muted);font-style:italic}
       <div class="big"><b>Resumo:</b> {{RESUMO}}</div>
       <div class="score"><span class="chip bad">▼ {{NBAD}} críticos</span><span class="chip warn">● {{NWARN}} em atenção</span><span class="chip ok">▲ {{NOK}} bons</span></div>
     </div></div>
+    <div class="kpis base-strip">{{BASE}}</div>
     <div class="sec"><h2>Faróis</h2><span class="n">cada indicador diz se está bom, em atenção ou crítico — e para onde está indo</span></div>
     <div class="farois">{{FAROIS}}</div>
     <div class="sec"><h2>O que olhar agora</h2><span class="n">gerado automaticamente a partir das regras dos faróis</span></div>
@@ -244,7 +247,7 @@ td.parcial{color:var(--muted);font-style:italic}
     </div>
     <div class="kpis" id="nKpis"></div>
     <div class="sec"><h2>Tendência da nota média</h2><span class="n" id="nChartSub"></span></div>
-    <div class="box"><div id="nChart"></div><div class="legend" id="nLeg"></div></div>
+    <div class="box"><div class="chart-wrap tall"><canvas id="nCanvas"></canvas></div><div class="legend" id="nLeg"></div></div>
     <div id="nGrpWrap"><div class="sec"><h2>Por grupo</h2><span class="n" id="nGrpSub"></span></div>
     <div class="box tbl"><table id="nGrp"></table></div>
     <p class="note">“Grupo de acesso de quem avaliou” usa o grupo_acesso do aluno na tabela usuarios: quem tem acesso a Pré-Vendas e Executivos conta nos dois. Status: ▼ crítico se a nota caiu 0,15+ vs. o período anterior ou se 10%+ das notas foram ≤ 3; ● atenção se caiu 0,05+ ou 5%+ de notas ≤ 3. Menos de 20 avaliações = amostra pequena.</p></div>
@@ -308,10 +311,10 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
     meses.slice().reverse().map(m=>'<option value="'+m+'">'+ml(m)+'</option>').join('');
   [...new Set(REV.map(r=>r[2]))].sort().forEach(g=>{const o=document.createElement('option');o.value=g;o.textContent=g;G.appendChild(o);});
   function periodo(v){
-    if(v==='3m') return {cur:range(add(ultimo,-2),3),prev:range(add(ultimo,-5),3),label:ml(add(ultimo,-2))+'–'+ml(ultimo)};
-    if(v==='6m') return {cur:range(add(ultimo,-5),6),prev:range(add(ultimo,-11),6),label:ml(add(ultimo,-5))+'–'+ml(ultimo)};
-    if(v==='all') return {cur:meses,prev:[],label:'todo o histórico'};
-    return {cur:[v],prev:[add(v,-1)],label:ml(v)};
+    if(v==='3m') return {cur:range(add(ultimo,-2),3),prev:range(add(ultimo,-5),3),label:ml(add(ultimo,-2))+'–'+ml(ultimo),plabel:ml(add(ultimo,-5))+'–'+ml(add(ultimo,-3))};
+    if(v==='6m') return {cur:range(add(ultimo,-5),6),prev:range(add(ultimo,-11),6),label:ml(add(ultimo,-5))+'–'+ml(ultimo),plabel:ml(add(ultimo,-11))+'–'+ml(add(ultimo,-6))};
+    if(v==='all') return {cur:meses,prev:[],label:'todo o histórico',plabel:''};
+    return {cur:[v],prev:[add(v,-1)],label:ml(v),plabel:ml(add(v,-1))};
   }
   const NEG=[['Palestrante vendendo o próprio produto',['propaganda','vend','produto dele','produto dela','ferramenta dele','ferramenta dela','proprio produto','jaba','comercial']],
     ['Conteúdo raso ou básico',['raso','basic','superficial','inicial','sem novidade','generic','pouco aprofund','fraca','fraco']],
@@ -340,39 +343,39 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
     const base=REV.filter(r=>(tipo===''||r[1]==+tipo)&&(grp===''||r[2]===grp)&&(ace===''||r[6].split('|').includes(ace)));
     const cur=base.filter(r=>per.cur.includes(r[0])), prev=base.filter(r=>per.prev.includes(r[0]));
     const sc=stat(cur), sp=stat(prev);
-    document.getElementById('fHint').textContent=per.prev.length?('Comparando '+per.label+' com o período anterior de mesmo tamanho'):'Sem comparação no histórico completo';
+    document.getElementById('fHint').textContent=per.prev.length?('Comparando '+per.label+' com '+per.plabel):'Sem comparação no histórico completo';
     const d=sp.n?sc.media-sp.media:null; const st=status(sc.media,sp.n?sp.media:null,sc.baixas,sc.n);
     const arrow=d==null?'':(d>=0.005?'<span class="up">▲ +'+br(d)+'</span>':(d<=-0.005?'<span class="down">▼ '+br(d)+'</span>':'<span class="flat">● '+br(d)+'</span>'));
     document.getElementById('nKpis').innerHTML=sc.n?
-     '<div class="farol '+st[0]+'"><div class="f-top"><span class="f-label">Nota média · '+per.label+'</span><span class="chip '+st[0]+'">'+st[1]+'</span></div><div class="f-val">'+br(sc.media)+' ★</div><div class="f-trend">'+(d==null?'—':arrow+' vs. '+br(sp.media)+' no período anterior')+'</div></div>'+
-     '<div class="farol '+(sc.baixas>=10?'bad':sc.baixas>=5?'warn':'ok')+'"><div class="f-top"><span class="f-label">Notas ≤ 3</span></div><div class="f-val">'+br(sc.baixas,1)+'%</div><div class="f-trend">'+(sp.n?'era '+br(sp.baixas,1)+'% no período anterior':'—')+'</div></div>'+
-     '<div class="farol info"><div class="f-top"><span class="f-label">Avaliações</span></div><div class="f-val">'+sc.n.toLocaleString('pt-BR')+'</div><div class="f-trend">'+(sp.n?(sc.n>=sp.n?'<span class="up">▲ ':'<span class="down">▼ ')+Math.round((sc.n/sp.n-1)*100)+'%</span> vs. período anterior':'—')+'</div></div>'+
+     '<div class="farol '+st[0]+'"><div class="f-top"><span class="f-label">Nota média · '+per.label+'</span><span class="chip '+st[0]+'">'+st[1]+'</span></div><div class="f-val">'+br(sc.media)+' ★</div><div class="f-trend">'+(d==null?'—':arrow+' vs. '+br(sp.media)+' em '+per.plabel)+'</div></div>'+
+     '<div class="farol '+(sc.baixas>=10?'bad':sc.baixas>=5?'warn':'ok')+'"><div class="f-top"><span class="f-label">Notas ≤ 3</span></div><div class="f-val">'+br(sc.baixas,1)+'%</div><div class="f-trend">'+(sp.n?'era '+br(sp.baixas,1)+'% em '+per.plabel:'—')+'</div></div>'+
+     '<div class="farol info"><div class="f-top"><span class="f-label">Avaliações</span></div><div class="f-val">'+sc.n.toLocaleString('pt-BR')+'</div><div class="f-trend">'+(sp.n?(sc.n>=sp.n?'<span class="up">▲ ':'<span class="down">▼ ')+Math.round((sc.n/sp.n-1)*100)+'%</span> vs. '+per.plabel:'—')+'</div></div>'+
      '<div class="farol info"><div class="f-top"><span class="f-label">Com comentário escrito</span></div><div class="f-val">'+br(sc.com,0)+'%</div><div class="f-trend">base das análises qualitativas abaixo</div></div>'
      :'<div class="empty">Nenhuma avaliação para esse filtro.</div>';
-    // gráfico (últimos 12 meses)
-    const ms=meses.slice(-12); const W=900,H=240,L=44,R=120,Tp=16,B=30;
-    const series=(tipo===''?[0,1]:[+tipo]).map(t=>({t,v:ms.map(m=>{const rs=base.filter(r=>r[0]===m&&r[1]===t);return rs.length>=10?rs.reduce((a,r)=>a+r[3],0)/rs.length:null;})}));
-    const vals=series.flatMap(s=>s.v).filter(v=>v!=null); const lo=Math.min(4.5,Math.floor(Math.min(...vals,5)*10)/10), hi=5;
-    const y=v=>Tp+(hi-v)/(hi-lo)*(H-Tp-B), x=i=>L+i*(W-L-R)/(ms.length-1);
-    const col=['var(--blue)','var(--teal)'];
-    let s='<svg viewBox="0 0 '+W+' '+H+'" class="linechart" role="img" aria-label="Nota média por mês">';
-    const band=ms.map((m,i)=>per.cur.includes(m)?i:-1).filter(i=>i>=0);
-    if(band.length&&P.value!=='all') s+='<rect x="'+(x(band[0])-12)+'" y="'+Tp+'" width="'+(x(band[band.length-1])-x(band[0])+24)+'" height="'+(H-Tp-B)+'" rx="6" fill="var(--blue-soft)"/>';
-    for(let v=lo;v<=hi+1e-9;v+=0.1){ s+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--line)"/><text class="ax" x="'+(L-8)+'" y="'+(y(v)+4)+'" text-anchor="end">'+br(v,1)+'</text>'; }
-    ms.forEach((m,i)=>{ s+='<text class="ax" x="'+x(i)+'" y="'+(H-8)+'" text-anchor="middle">'+M[+m.slice(5)-1]+'</text>'; });
-    series.forEach(se=>{ let p='',last=null; se.v.forEach((v,i)=>{ if(v!=null){p+=x(i)+','+y(v)+' ';last=[i,v];} });
-      s+='<polyline points="'+p+'" fill="none" stroke="'+col[se.t]+'" stroke-width="2.5" stroke-linejoin="round"/>';
-      se.v.forEach((v,i)=>{ if(v!=null) s+='<circle cx="'+x(i)+'" cy="'+y(v)+'" r="4" fill="'+col[se.t]+'" stroke="var(--panel)" stroke-width="2"><title>'+TIPO[se.t]+' '+ml(ms[i])+': '+br(v)+'</title></circle>'; });
-      if(last) s+='<text class="lbl" x="'+(x(last[0])+8)+'" y="'+(y(last[1])+(se.t?-6:12))+'">'+TIPO[se.t]+' '+br(last[1])+'</text>'; });
-    document.getElementById('nChart').innerHTML=s+'</svg>';
-    document.getElementById('nLeg').innerHTML=series.map(se=>'<span><i style="background:'+col[se.t]+'"></i>'+TIPO[se.t]+'</span>').join('')+'<span class="muted">meses com menos de 10 avaliações ficam de fora · faixa azul = período filtrado</span>';
+    // gráfico (últimos 12 meses) — Chart.js, com tooltip e rótulos
+    const ms=meses.filter(m=>m<hojeM).slice(-12);
+    const CORES=['#1E5EFF','#0E9384'];
+    const series=(tipo===''?[0,1]:[+tipo]).map(t=>{const pts=ms.map(m=>{const rs=base.filter(r=>r[0]===m&&r[1]===t);return {n:rs.length,v:rs.length>=10?rs.reduce((a,r)=>a+r[3],0)/rs.length:null};});return {t,pts};});
+    if(window.__notasChart){window.__notasChart.destroy();}
+    const faixa=ms.map(m=>per.cur.includes(m)&&P.value!=='all');
+    window.__notasChart=mkChart(document.getElementById('nCanvas'),{type:'line',
+      data:{labels:ms.map(ml),datasets:series.map(se=>({label:TIPO[se.t],data:se.pts.map(p=>p.v),_n:se.pts.map(p=>p.n),borderColor:CORES[se.t],backgroundColor:CORES[se.t],
+        borderWidth:2.5,cubicInterpolationMode:'monotone',spanGaps:true,clip:false,pointRadius:ms.map((m,i)=>faixa[i]?5:3.5),pointHoverRadius:7,pointBorderColor:'#fff',pointBorderWidth:2}))},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{top:24,right:16}},
+        plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}},
+          tooltip:{callbacks:{label:c=>c.parsed.y==null?null:' '+c.dataset.label+': '+br(c.parsed.y)+' ★ ('+c.dataset._n[c.dataIndex]+' avaliações)'}},
+          datalabels:{display:c=>c.dataset.data[c.dataIndex]!=null&&(faixa[c.dataIndex]||c.dataIndex===ms.length-1),align:c=>c.datasetIndex?'bottom':'top',offset:6,
+            color:c=>CORES[series[c.datasetIndex].t],font:{size:11,weight:'700'},formatter:v=>br(v)}},
+        scales:{y:{min:Math.min(4.5,Math.floor(Math.min(...series.flatMap(s=>s.pts.map(p=>p.v)).filter(v=>v!=null),5)*10)/10),max:5,ticks:{stepSize:0.1,callback:v=>br(v,1)},grid:{color:'rgba(11,30,61,.06)'}},
+                x:{grid:{color:c=>faixa[c.index]?'rgba(30,94,255,.10)':'transparent',lineWidth:40}}}}});
+    document.getElementById('nLeg').innerHTML='<span class="muted">Passe o mouse para ver a nota e o nº de avaliações · pontos maiores = período filtrado · meses com menos de 10 avaliações ficam de fora</span>';
     document.getElementById('nChartSub').textContent=(grp||'todos os grupos de conteúdo')+(ace?' · avaliado por quem tem acesso a '+ace:'')+' · últimos 12 meses';
     // por grupo
     const wrap=document.getElementById('nGrpWrap'); wrap.hidden=!!grp;
     if(!grp){
       const gs=[...new Set(base.map(r=>r[2]))].map(g=>{const a=stat(cur.filter(r=>r[2]===g)),b=stat(prev.filter(r=>r[2]===g));return {g,a,b};}).filter(o=>o.a.n).sort((p,q)=>p.a.media-q.a.media);
-      document.getElementById('nGrpSub').textContent=per.label+(per.prev.length?' vs. período anterior':'')+' · do pior para o melhor';
-      document.getElementById('nGrp').innerHTML='<tr><th>Grupo</th><th class="n">Anterior</th><th class="n">Período</th><th class="n">Var.</th><th class="n">Notas ≤3</th><th class="n">Aval.</th><th>Status</th></tr>'+gs.map(o=>{
+      document.getElementById('nGrpSub').textContent='período filtrado ('+per.label+')'+(per.prev.length?' comparado com o mesmo tamanho logo antes ('+per.plabel+')':'')+' · do pior para o melhor';
+      document.getElementById('nGrp').innerHTML='<tr><th>Grupo</th><th class="n">'+(per.plabel||'Anterior')+'</th><th class="n">'+per.label+'</th><th class="n">Var.</th><th class="n">Notas ≤3</th><th class="n">Aval.</th><th>Status</th></tr>'+gs.map(o=>{
         const dv=o.b.n?o.a.media-o.b.media:null, st=status(o.a.media,o.b.n?o.b.media:null,o.a.baixas,o.a.n);
         return '<tr><td>'+esc(o.g)+'</td><td class="n">'+(o.b.n?br(o.b.media):'—')+'</td><td class="n"><b>'+br(o.a.media)+'</b></td><td class="n">'+(dv==null?'—':'<span class="'+(dv<0?'down':'up')+'">'+(dv<0?'▼ ':'▲ ')+br(Math.abs(dv))+'</span>')+'</td><td class="n">'+br(o.a.baixas,1)+'%</td><td class="n">'+o.a.n+'</td><td><span class="chip '+st[0]+'">'+st[1]+'</span></td></tr>';}).join('');
     }
@@ -417,6 +420,7 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   });
 })();
 // ================= QUALIDADE: busca =================
+(function(){const s=document.getElementById('sBusca'); if(s) s.addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('#sTab tr').forEach((tr,i)=>{if(i)tr.hidden=!tr.textContent.toLowerCase().includes(q);});});})();
 document.getElementById('qBusca').addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('#qTab tr').forEach((tr,i)=>{if(i)tr.hidden=!tr.textContent.toLowerCase().includes(q);});});
 
 // ================= PACE DE MAU (igual à versão anterior) =================
@@ -600,6 +604,24 @@ try {
 })();
 
 } catch(e){ console.error(e); document.getElementById('pace-callout').textContent='Não foi possível montar o PACE: '+e.message; }
+// ================= MAU & Retenção: gráfico duas leituras =================
+(function(){
+  const el=document.getElementById('mauDados'); if(!el) return;
+  const D=JSON.parse(el.textContent); const pc=v=>v==null?'—':v.toFixed(1).replace('.',',')+'%';
+  const n=v=>Math.round(v).toLocaleString('pt-BR');
+  mkChart(document.getElementById('mauCanvas'),{type:'line',
+    data:{labels:D.labels,datasets:[
+      {label:'Só ativos hoje',data:D.ativos,_n:D.n_ativos,_b:D.base_ativos,borderColor:'#1E5EFF',backgroundColor:'rgba(30,94,255,.08)',fill:true,borderWidth:2.5,cubicInterpolationMode:'monotone',pointRadius:4,pointHoverRadius:7,pointBackgroundColor:'#1E5EFF',pointBorderColor:'#fff',pointBorderWidth:2,
+        segment:{borderDash:c=>c.p1DataIndex===D.labels.length-1&&D.parcial?[6,4]:undefined}},
+      {label:'Com quem saiu depois',data:D.todos,_n:D.n_todos,_b:D.base_todos,borderColor:'#0E9384',backgroundColor:'transparent',borderWidth:2.5,cubicInterpolationMode:'monotone',pointRadius:4,pointHoverRadius:7,pointBackgroundColor:'#0E9384',pointBorderColor:'#fff',pointBorderWidth:2,
+        segment:{borderDash:c=>c.p1DataIndex===D.labels.length-1&&D.parcial?[6,4]:undefined}}]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{top:26,right:20}},
+      plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}},
+        tooltip:{callbacks:{title:i=>i[0].label+(D.parcial&&i[0].dataIndex===D.labels.length-1?' (em andamento)':''),
+          label:c=>' '+c.dataset.label+': '+pc(c.parsed.y)+' — '+n(c.dataset._n[c.dataIndex])+' de '+n(c.dataset._b[c.dataIndex])+' pessoas'}},
+        datalabels:{display:true,align:c=>c.datasetIndex?'top':(Math.abs((D.todos[c.dataIndex]||0)-(D.ativos[c.dataIndex]||0))<6?'bottom':'top'),offset:6,font:{size:10.5,weight:'700'},color:c=>c.datasetIndex?'#0E9384':'#1E5EFF',formatter:v=>pc(v)}},
+      scales:{y:{beginAtZero:true,ticks:{callback:v=>v+'%'},grid:{color:'rgba(11,30,61,.06)'}},x:{grid:{display:false}}}}});
+})();
 // download CSV genérico (tabela do PACE)
 document.querySelectorAll('.download-btn').forEach(btn=>btn.addEventListener('click',()=>{
   const rows=[...document.getElementById(btn.dataset.table).querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>'"'+td.textContent.replace(/"/g,'""')+'"').join(';'));
