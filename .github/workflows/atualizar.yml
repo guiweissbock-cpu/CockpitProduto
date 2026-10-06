@@ -5,6 +5,7 @@ on:
     paths:
       - "data/**"
       - "gerar_dashboard.py"
+      - "paineis.py"
       - "template.html"
       - "metas_mau.csv"
       - "metas_mau_grupo.csv"
