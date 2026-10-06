@@ -143,8 +143,10 @@ def _supabase_fetch(table, select="*", page_size=1000):
 
 
 # DASHBOARD_HOJE=AAAA-MM-DD permite simular outra data de referencia (teste local).
+# "Hoje" no fuso de Brasilia (o GitHub Actions roda em UTC; sem isso, uma
+# execucao depois das 21h viraria o dia antes da hora).
 TODAY = (pd.Timestamp(os.environ["DASHBOARD_HOJE"]) if os.environ.get("DASHBOARD_HOJE")
-         else pd.Timestamp.today()).normalize()
+         else pd.Timestamp.now(tz="America/Sao_Paulo").tz_localize(None)).normalize()
 MES_ATUAL = TODAY.strftime("%Y-%m")
 # ultimo mes fechado = mes anterior ao mes corrente
 ULTIMO_MES_FECHADO = (TODAY.replace(day=1) - pd.Timedelta(days=1)).strftime("%Y-%m")
