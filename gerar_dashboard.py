@@ -1161,7 +1161,15 @@ def main():
 
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, mau_mes_ativos, volume_medio = agregacoes_consumo(cp)
     mau_grupo_mes = mau_por_grupo(cp)
-    pace = mau_pace(cp, usuarios)
+    # O PACE nunca pode derrubar o painel inteiro: se der erro, o resto e
+    # gerado normalmente e a aba PACE mostra "sem dados"; o erro fica no log.
+    try:
+        pace = mau_pace(cp, usuarios)
+    except Exception:
+        import traceback
+        print("  ERRO no PACE de MAU (painel segue sem essa aba):")
+        traceback.print_exc()
+        pace = None
     nota_grupo, reviews_detalhe = load_reviews(mapping)
     nota_grupo_vivo, reviews_detalhe_vivo = load_csat_ao_vivo()
     nota_grupo_combinado = pd.concat([nota_grupo, nota_grupo_vivo], ignore_index=True)
