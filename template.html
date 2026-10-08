@@ -622,6 +622,21 @@ try {
         datalabels:{display:true,align:c=>c.datasetIndex?'top':(Math.abs((D.todos[c.dataIndex]||0)-(D.ativos[c.dataIndex]||0))<6?'bottom':'top'),offset:6,font:{size:10.5,weight:'700'},color:c=>c.datasetIndex?'#0E9384':'#1E5EFF',formatter:v=>pc(v)}},
       scales:{y:{beginAtZero:true,ticks:{callback:v=>v+'%'},grid:{color:'rgba(11,30,61,.06)'}},x:{grid:{display:false}}}}});
 })();
+// ================= Consumo por Grupo: aulas concluídas mês a mês =================
+(function(){
+  const el=document.getElementById('aulasDados'); if(!el) return;
+  const D=JSON.parse(el.textContent); const n=v=>Math.round(v).toLocaleString('pt-BR');
+  const last=D.labels.length-1;
+  mkChart(document.getElementById('aulasCanvas'),{type:'bar',
+    data:{labels:D.labels,datasets:D.grupos.map(g=>({label:g.nome,data:g.dados,backgroundColor:D.labels.map((_,i)=>D.parcial&&i===last?g.cor+'66':g.cor),borderWidth:0,stack:'a'}))},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{top:22}},
+      plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}},
+        tooltip:{filter:i=>i.parsed.y>0,callbacks:{title:i=>i[0].label+(D.parcial&&i[0].dataIndex===last?' (em andamento)':''),
+          label:c=>' '+c.dataset.label+': '+n(c.parsed.y)+' aulas',footer:i=>'Total: '+n(D.total[i[0].dataIndex])+' aulas'}},
+        datalabels:{display:c=>c.datasetIndex===D.grupos.length-1,anchor:'end',align:'top',offset:2,font:{size:10.5,weight:'700'},color:'#0B1E3D',
+          formatter:(v,c)=>n(D.total[c.dataIndex])}},
+      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'rgba(11,30,61,.06)'},ticks:{callback:v=>n(v)}}}}});
+})();
 // download CSV genérico (tabela do PACE)
 document.querySelectorAll('.download-btn').forEach(btn=>btn.addEventListener('click',()=>{
   const rows=[...document.getElementById(btn.dataset.table).querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>'"'+td.textContent.replace(/"/g,'""')+'"').join(';'));

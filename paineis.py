@@ -493,6 +493,7 @@ def _consumo(d, ex, ult, ant):
     tres = meses_f[-4:-1]
     doze = meses_f[-12:]
     cm = pd.DataFrame(d["consumo_mes"])
+    vol_html = _volume_aulas(cm, d["meta"]["mes_parcial"], ult, ant)
     au = cm.groupby(["mes", "grupo"])["aulas_assistidas"].sum()
     av = cm[cm["tipo"] == "Ao Vivo"].groupby(["mes", "grupo"])["aulas_assistidas"].sum()
     G = []
@@ -502,7 +503,7 @@ def _consumo(d, ex, ult, ant):
         v = lambda m: float(av.get((m, g), 0))
         u3 = np.mean([u(m) for m in tres]) if tres else 0
         a3, uu3 = sum(a(m) for m in tres), sum(u(m) for m in tres)
-        G.append(dict(grupo=g, usuarios=u(ult), ant=u(ant), u3=u3,
+        G.append(dict(grupo=g, usuarios=u(ult), ant=u(ant), u3=u3, aulas=a(ult), aulas_ant=a(ant), aulas12=sum(a(m) for m in doze),
                       var_mes=(u(ult) / u(ant) - 1) * 100 if u(ant) else None, var_3m=(u(ult) / u3 - 1) * 100 if u3 else None,
                       apu=a(ult) / u(ult) if u(ult) else None, apu3=a3 / uu3 if uu3 else None,
                       vivo=v(ult) / a(ult) * 100 if a(ult) else None, vivo3=sum(v(m) for m in tres) / a3 * 100 if a3 else None,
@@ -519,6 +520,7 @@ def _consumo(d, ex, ult, ant):
             f'<div class="f-val">{ni(g["usuarios"])} <small>usuários em {ml(ult)}</small></div>'
             f'<div class="f-trend">{seta(g["var_mes"], 0, "%")} vs. {ml(ant)} · {seta(g["var_3m"], 0, "%")} vs. média 3m</div>'
             f'{spark(g["serie"])}'
+            f'<div class="mini-kv"><span>Aulas concluídas em {ml(ult)}</span><b>{ni(g["aulas"])}</b><span class="muted">{seta((g["aulas"] / g["aulas_ant"] - 1) * 100 if g["aulas_ant"] else None, 0, "%")} · 12m {ni(g["aulas12"])}</span></div>'
             f'<div class="mini-kv"><span>Aulas por usuário</span><b>{br(g["apu"])}</b><span class="muted">média 3m {br(g["apu3"])}</span></div>'
             f'<div class="mini-kv"><span>% das aulas ao vivo</span><b>{br(g["vivo"], 0)}%</b><span class="muted">média 3m {br(g["vivo3"], 0)}%</span></div>'
             f'<div class="mini-kv"><span>Top aulas do mês (usuários)</span><b></b></div><ul class="toplist">{tl or "<li class=muted>—</li>"}</ul>'
@@ -537,7 +539,8 @@ def _consumo(d, ex, ult, ant):
     linha = lambda r: f'<tr><td>{esc(r["aula"][:90])}</td><td>{esc(r["grupo"])}</td><td class="n">{ni(r["b"])}</td><td class="n"><b>{ni(r["a"])}</b></td><td class="n">{seta(r["a"] - r["b"], 0, "")}</td></tr>'
     cab = f'<tr><th>Aula</th><th>Grupo</th><th class="n">{ml(ant)}</th><th class="n">{ml(ult)}</th><th class="n">Var.</th></tr>'
     cn = ex["conteudo_novo"]
-    html_ = (f'<div class="sec"><h2>Leitura do mês ({ml(ult)}, último fechado)</h2><span class="n">gerada pelas regras · compara com o mês anterior e com a média dos 3 meses antes</span></div>'
+    html_ = (vol_html +
+             f'<div class="sec"><h2>Leitura do mês ({ml(ult)}, último fechado)</h2><span class="n">gerada pelas regras · compara com o mês anterior e com a média dos 3 meses antes</span></div>'
              f'<div class="box"><ul class="alerts">{"".join(ins) or item("ok", "Nenhuma mudança relevante.")}</ul></div>'
              f'<div class="sec"><h2>Por grupo de conteúdo</h2><span class="n">ordenado do mais em queda para o mais em alta · linha = usuários únicos nos últimos 12 meses</span></div>'
              f'<div class="farois">{"".join(cards)}</div>'
@@ -546,6 +549,63 @@ def _consumo(d, ex, ult, ant):
              f'<div class="box tbl"><h3>{chip("bad", "Em queda")} Aulas que mais perderam usuários</h3><table>{cab}{"".join(linha(r) for r in ex["queda"]) or "<tr><td class=muted>—</td></tr>"}</table></div></div>'
              '')
     return html_, pior(sts)
+
+
+CORES_GRUPO = {"Pré-Vendas": "#1E5EFF", "Executivos": "#0E9384", "Gestão": "#F79009", "Canais e Parcerias": "#7A5AF8",
+               "Class": "#EE46BC", "Programas Especiais": "#2E90FA", "Sem Grupo Identificado": "#98A2B3"}
+
+
+def _volume_aulas(cm, parcial, ult, ant):
+    """Aulas concluídas: total do mês, mês em andamento, acumulado no ano e desde o início,
+    gráfico mês a mês por grupo de conteúdo e a tabela que dá para baixar."""
+    if not len(cm):
+        return ""
+    grupos = [g for g in list(CORES_GRUPO) if g in set(cm["grupo"])] + sorted(set(cm["grupo"]) - set(CORES_GRUPO))
+    tot = cm.groupby("mes")["aulas_assistidas"].sum()
+    por = cm.groupby(["mes", "grupo"])["aulas_assistidas"].sum()
+    vivo = cm[cm["tipo"] == "Ao Vivo"].groupby("mes")["aulas_assistidas"].sum()
+    meses = sorted(m for m in tot.index if m <= parcial)
+    fechados = [m for m in meses if m < parcial]
+    ult12 = fechados[-12:]
+    v = lambda m: float(tot.get(m, 0))
+    var_u = (v(ult) / v(ant) - 1) * 100 if ant and v(ant) else None
+    st_u = "info" if var_u is None else ("ok" if var_u >= 0 else ("warn" if var_u > -15 else "bad"))
+    ano = parcial[:4]
+    acum_ano = sum(v(m) for m in meses if m.startswith(ano))
+    acum_ano_ant = sum(v(m) for m in meses if m.startswith(str(int(ano) - 1)) and m[5:] <= parcial[5:])
+    var_ano = (acum_ano / acum_ano_ant - 1) * 100 if acum_ano_ant else None
+    total = float(tot.sum())
+    media12 = np.mean([v(m) for m in ult12]) if ult12 else None
+    k = "".join([
+        farol(st_u, f"Aulas concluídas · {ml(ult)}", ni(v(ult)), f"Média dos últimos 12 meses fechados: {ni(media12)} aulas/mês.",
+              seta(var_u, 0, "%") + f" vs. {ml(ant)} ({ni(v(ant))})" if ant else "", spark([v(m) for m in ult12])),
+        farol("info", f"{ml(parcial)} até agora", ni(v(parcial)), "Mês em andamento: não compare com meses fechados."),
+        farol("info", f"Acumulado em {ano}", ni(acum_ano), f"Mesmo período de {int(ano) - 1}: {ni(acum_ano_ant)} aulas.",
+              seta(var_ano, 0, "%") + f" vs. {int(ano) - 1}" if var_ano is not None else ""),
+        farol("info", "Total desde o início", ni(total), f"Desde {ml(meses[0])}, somando gravadas e ao vivo."),
+    ])
+    serie = meses[-13:]
+    dados = dict(labels=[ml(m) + ("*" if m == parcial else "") for m in serie], parcial=serie[-1] == parcial,
+                 total=[v(m) for m in serie],
+                 grupos=[dict(nome=g, cor=CORES_GRUPO.get(g, "#667085"), dados=[float(por.get((m, g), 0)) for m in serie]) for g in grupos])
+    graf = ('<div class="chart-wrap tall"><canvas id="aulasCanvas"></canvas></div>'
+            f'<script type="application/json" id="aulasDados">{json.dumps(dados, ensure_ascii=False)}</script>')
+    cab = "".join(f'<th class="n">{esc(g)}</th>' for g in grupos)
+    linhas = ""
+    for m in reversed(meses[-24:]):
+        cel = "".join(f'<td class="n">{ni(por.get((m, g), 0))}</td>' for g in grupos)
+        pv = float(vivo.get(m, 0)) / v(m) * 100 if v(m) else None
+        linhas += (f'<tr><td>{ml(m)}{"*" if m == parcial else ""}</td>{cel}<td class="n"><b>{ni(v(m))}</b></td>'
+                   f'<td class="n">{br(pv, 0)}%</td></tr>')
+    tabela = (f'<div class="box tbl" style="margin-top:12px"><h3>Aulas concluídas por mês e grupo (últimos 24 meses)'
+              f'<button class="download-btn" data-table="tabAulasMes" data-filename="aulas_por_mes.csv" style="margin-left:auto">Baixar CSV</button></h3>'
+              f'<div style="overflow-x:auto"><table id="tabAulasMes"><tr><th>Mês</th>{cab}<th class="n">Total</th><th class="n">% ao vivo</th></tr>{linhas}</table></div>'
+              f'<p class="note">Cada linha de consumo é uma aula concluída (gravada na Waid ou presença ao vivo). Em cursos com várias aulas, cada aula conta separada. * mês em andamento.</p></div>')
+    return (f'<div class="sec"><h2>Volume de aulas concluídas</h2><span class="n">quantas aulas foram assistidas, no total e por grupo de conteúdo</span></div>'
+            f'<div class="farois">{k}</div>'
+            f'<div class="box" style="margin-top:12px"><h3>Aulas concluídas mês a mês, por grupo de conteúdo</h3>{graf}'
+            f'<p class="note">Barras empilhadas somam o total do mês (número em cima). Passe o mouse para ver cada grupo. * mês em andamento.</p></div>'
+            + tabela)
 
 
 def _contas(d, ex, C, ult):
