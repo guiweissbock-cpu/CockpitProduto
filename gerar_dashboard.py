@@ -500,6 +500,7 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
             # (na pratica e o unico valor confiavel que ela envia hoje - ver
             # nota no README sobre o bug de progresso parcial reportado a Waid)
             live = live[live["progress"] == 100].copy()
+        live_raw_ids = live["content_id"].astype(str) if len(live) and "content_id" in live else pd.Series(dtype=str)
         if len(live):
             live["Email"] = live["member_email"].astype(str).str.strip().str.lower()
             live["Conteúdo"] = live["content_title"].astype(str).str.strip()
@@ -517,8 +518,34 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
         else:
             historico = pd.DataFrame(columns=empty_cols)
 
-        print(f"  (via Supabase: {len(live)} eventos em tempo real + {len(historico)} do historico)")
-        cp = pd.concat([historico, live], ignore_index=True)
+        # Cursos com varias aulas (Certificacoes, Programas, "Inicie sua jornada"...): o webhook so
+        # manda 1 linha por pessoa + curso. Nesses cursos o consumo vem de consumo_licoes (1 linha por
+        # aula, alimentada pelas automacoes "Aula assistida" da Waid + carga unica do export de aulas).
+        licoes = pd.DataFrame(columns=empty_cols)
+        try:
+            mapa = _supabase_fetch("waid_licoes", select="lesson_id,pacote_content_id,pacote_content_uuid,pacote_title")
+            cl = _supabase_fetch("consumo_licoes", select="member_email,lesson_id,completed_at")
+        except Exception as e:  # tabelas ainda nao criadas: segue como antes
+            print(f"  (sem consumo por aula: {e})")
+            mapa = pd.DataFrame()
+            cl = pd.DataFrame()
+        if len(mapa):
+            ids_pacote = set(mapa["pacote_content_id"].astype(str)) | set(mapa["pacote_content_uuid"].dropna().astype(str))
+            titulos_pacote = set(mapa["pacote_title"].astype(str).str.strip().str.lower().str.replace(r"\s+", " ", regex=True))
+            if len(live):
+                live = live[~live_raw_ids.reindex(live.index).isin(ids_pacote)]
+            if len(historico):
+                historico = historico[~historico["Conteúdo"].str.lower().str.replace(r"\s+", " ", regex=True).isin(titulos_pacote)]
+            if len(cl):
+                cl = cl.merge(mapa, on="lesson_id", how="inner")
+                licoes = pd.DataFrame({
+                    "Email": cl["member_email"].astype(str).str.strip().str.lower(),
+                    "Conteúdo": cl["pacote_title"].astype(str).str.strip(),
+                    "data": pd.to_datetime(cl["completed_at"], utc=True, errors="coerce").dt.tz_convert(None),
+                })
+
+        print(f"  (via Supabase: {len(live)} eventos em tempo real + {len(historico)} do historico + {len(licoes)} aulas de cursos com varias aulas)")
+        cp = pd.concat([historico, live, licoes], ignore_index=True)
         cp = cp.dropna(subset=["data"])
     else:
         cp = pd.read_excel(DATA / "classes_progress.xlsx")
