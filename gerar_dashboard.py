@@ -142,6 +142,45 @@ def _supabase_fetch(table, select="*", page_size=1000):
     return pd.DataFrame(rows)
 
 
+# ---------------------------------------------------------------
+# CONTAS FORA DA ANALISE (ex.: Rapport, parceria B2C)
+# Lista mantida no Supabase (tabela contas_fora_analise) -- a mesma que os
+# outros paineis usam. Tudo dessas contas sai do Cockpit: a conta, os
+# usuarios, o consumo e as avaliacoes. Para incluir/excluir uma conta,
+# basta mexer na tabela; nao precisa alterar este script.
+# Sem Supabase (rodando local), vale a lista fixa abaixo.
+# ---------------------------------------------------------------
+CONTAS_FORA_PADRAO = {20654}  # Rapport
+CONTAS_FORA_ANALISE = set()
+EMAILS_FORA_ANALISE = set()
+
+
+def _carregar_contas_fora():
+    ids = set(CONTAS_FORA_PADRAO)
+    if USE_SUPABASE:
+        try:
+            t = _supabase_fetch("contas_fora_analise", "conta_id")
+            if len(t):
+                ids = set(pd.to_numeric(t["conta_id"], errors="coerce").dropna().astype(int))
+        except Exception as e:
+            print(f"  AVISO: nao li contas_fora_analise ({e}); usando a lista padrao {sorted(ids)}")
+    CONTAS_FORA_ANALISE.clear()
+    CONTAS_FORA_ANALISE.update(ids)
+    print(f"  contas fora da analise: {sorted(CONTAS_FORA_ANALISE)}")
+
+
+def _fora(serie_ids):
+    """True para as linhas cujo id de conta esta na lista de exclusao."""
+    return pd.to_numeric(serie_ids, errors="coerce").isin(CONTAS_FORA_ANALISE)
+
+
+def _sem_emails_fora(df, col):
+    """Remove linhas de pessoas das contas fora da analise (consumo, avaliacoes)."""
+    if not len(df) or col not in df.columns or not EMAILS_FORA_ANALISE:
+        return df
+    return df[~df[col].astype(str).str.strip().str.lower().isin(EMAILS_FORA_ANALISE)]
+
+
 # DASHBOARD_HOJE=AAAA-MM-DD permite simular outra data de referencia (teste local).
 # "Hoje" no fuso de Brasilia (o GitHub Actions roda em UTC; sem isso, uma
 # execucao depois das 21h viraria o dia antes da hora).
@@ -190,6 +229,11 @@ def load_contas_contratos():
     else:
         contas = pd.read_csv(DATA / "contasb2b.csv")
         contratos = pd.read_csv(DATA / "contratos.csv")
+    n_antes = len(contas)
+    contas = contas[~_fora(contas["id"])].copy()
+    contratos = contratos[~_fora(contratos["conta_id"])].copy()
+    if n_antes != len(contas):
+        print(f"  ({n_antes - len(contas)} conta(s) fora da analise removida(s))")
     contratos["data_churn"] = pd.to_datetime(contratos["data_churn"], errors="coerce", utc=True)
     contratos["ativo"] = contratos["data_churn"].isna()
 
@@ -221,6 +265,15 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
     else:
         usuarios = pd.read_csv(DATA / "usuarios.csv")
     usuarios["email"] = usuarios["email"].astype(str).str.strip().str.lower()
+    # Pessoas das contas fora da analise: guarda os e-mails (para tirar o consumo
+    # e as avaliacoes delas) e remove da base. Quem tambem esta em outra conta
+    # (mesmo e-mail) continua contando por essa outra conta.
+    fora = _fora(usuarios["id_conta"])
+    EMAILS_FORA_ANALISE.clear()
+    EMAILS_FORA_ANALISE.update(set(usuarios.loc[fora, "email"]) - set(usuarios.loc[~fora, "email"]))
+    if fora.any():
+        print(f"  ({int(fora.sum())} usuarios de contas fora da analise removidos)")
+    usuarios = usuarios[~fora].copy()
     usuarios["data_criacao"] = pd.to_datetime(usuarios["data_criacao"], errors="coerce")
     usuarios["status_conta"] = usuarios["id_conta"].map(conta_status_map)
     usuarios["nome_conta"] = usuarios["id_conta"].map(conta_nome_map)
@@ -575,6 +628,10 @@ def load_consumo(mapping, aulas_ao_vivo, usuarios):
         print(f"  (Zoom presenca: +{len(zoom)} presencas somadas ao consumo, "
               f"{len(set(zoom['Email']) - set(cp['Email']))} pessoas que nao apareciam na Waid)")
         cp = pd.concat([cp, zoom], ignore_index=True)
+    n_antes = len(cp)
+    cp = _sem_emails_fora(cp, "Email")
+    if n_antes != len(cp):
+        print(f"  ({n_antes - len(cp)} aulas de contas fora da analise removidas do consumo)")
     cp["data"] = pd.to_datetime(cp["data"])  # garante dtype unico apos concat (resolucoes ns/us)
     cp["semana"] = cp["data"].dt.strftime("%G-W%V")
     cp["mes"] = cp["data"].dt.strftime("%Y-%m")
@@ -849,6 +906,7 @@ def mau_pace(cp, usuarios):
 # ---------------------------------------------------------------
 def load_reviews(mapping):
     rv = pd.read_excel(DATA / "reviews_contents.xlsx")
+    rv = _sem_emails_fora(rv, "Email")
     rv["Curso"] = rv["Curso"].astype(str).str.strip()
     rv["grupo"] = _map_case_insensitive(rv["Curso"], mapping).fillna("Sem Grupo Identificado")
     nota_grupo = rv.groupby("grupo")["Avaliação"].agg(["mean", "count"]).reset_index()
@@ -968,6 +1026,7 @@ def load_csat_ao_vivo():
         )
 
     rv = pd.concat(partes, ignore_index=True)
+    rv = _sem_emails_fora(rv, "email")
     rv["grupo"] = rv["topico"].apply(_classificar_topico_ao_vivo)
 
     nota_grupo_vivo = rv.groupby("grupo")["nota_geral"].agg(["mean", "count"]).reset_index()
@@ -1010,6 +1069,7 @@ def mau_buckets(empresas_df):
 def load_downloads(cp):
     dl = pd.read_excel(DATA / "downloads.xlsx")
     dl["E-mail"] = dl["E-mail"].astype(str).str.strip().str.lower()
+    dl = _sem_emails_fora(dl, "E-mail")
     dl["Conteúdo"] = dl["Conteúdo"].astype(str).str.strip()
     watched_pairs = set(zip(cp["Email"], cp["Conteúdo"]))
     dl["assistiu_depois"] = dl.apply(lambda r: (r["E-mail"], r["Conteúdo"]) in watched_pairs, axis=1)
@@ -1180,6 +1240,7 @@ def main():
     print(f"Gerando dashboard | hoje={TODAY.date()} | ultimo mes fechado={ULTIMO_MES_FECHADO}")
 
     _refresh_google_sheets()
+    _carregar_contas_fora()
 
     contas, contratos, conta_status_map, conta_nome_map, conta_csm_map, contas_resumo = load_contas_contratos()
     usuarios, usuarios_resumo = load_usuarios(conta_status_map, conta_nome_map, conta_csm_map)

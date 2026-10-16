@@ -218,10 +218,47 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado):
                          inativos_viram=i_viu, viram_ativos=a_viu, mau_ativos=mau_at, mau_todos=mau_todos,
                          mau_3m=base3, dias=dias, ativacao=ativ, score=score))
     sem_user = [nome.get(cid, cid) for cid in ativas if cid not in set(uu["conta"])]
+    ex["churn_usuarios"] = churn_usuarios(c, hoje, mes_atual)
     ex["contas"] = rows
     ex["contas_sem_usuario"] = sorted(sem_user)
     ex["ult"], ex["ant"] = ult, ant
     return ex
+
+
+def churn_usuarios(c, hoje, mes_atual, n_meses=12):
+    """Churn de usuários mês a mês: dos que concluíram ao menos 1 aula no mês
+    anterior (base), quantos concluíram ao menos 1 aula no mês (voltaram) e
+    quantos não (perdidos). Últimos `n_meses` fechados + o mês em andamento.
+
+    O mês em andamento sempre parece pior (ainda tem dias pela frente), então
+    para ele também calculamos o mesmo recorte do mês anterior até o mesmo dia
+    ("no mesmo ponto do mês passado"), que é a comparação justa."""
+    por_mes = c.groupby("mes")["Email"].apply(set)
+    meses = sorted(por_mes.index)
+    linhas = []
+    for i in range(1, len(meses)):
+        m, ant = meses[i], meses[i - 1]
+        if _add_mes(ant, 1) != m:  # buraco na série: sem mês anterior de verdade
+            continue
+        base = por_mes[ant]
+        if not base:
+            continue
+        volt = len(base & por_mes[m])
+        linhas.append(dict(mes=m, base=len(base), voltaram=volt, perdidos=len(base) - volt,
+                           pct=round((len(base) - volt) / len(base) * 100, 1), parcial=(m == mes_atual)))
+    fechados = [r for r in linhas if not r["parcial"]][-n_meses:]
+    parcial = next((r for r in linhas if r["parcial"]), None)
+    if parcial and len(fechados) >= 2:
+        # mesmo ponto do mês passado: base de 2 meses atrás x quem voltou até o mesmo dia
+        dia = hoje.day
+        m_ant = fechados[-1]["mes"]
+        base_ant = por_mes.get(_add_mes(m_ant, -1), set())
+        ate_dia = set(c.loc[(c["mes"] == m_ant) & (c["data"].dt.day <= dia), "Email"])
+        if base_ant:
+            parcial["mesmo_ponto_pct"] = round((len(base_ant) - len(base_ant & ate_dia)) / len(base_ant) * 100, 1)
+            parcial["mesmo_ponto_mes"] = m_ant
+            parcial["dia"] = dia
+    return fechados + ([parcial] if parcial else [])
 
 
 def reviews_com_acesso(reviews_g, reviews_v, usuarios, grupos_acesso_do_usuario):
@@ -344,6 +381,24 @@ def montar(d, ex, rev_rows):
         F.append(("mau", farol(st_m1, "Retenção M+1 (coorte)", f"{br(m1_last['m1'])}%",
                                f"Coorte {ml(m1_last['cohort'])}: % que voltou a consumir no mês seguinte." + (f" Média das 3 anteriores: {br(m1_avg)}%." if m1_avg else ""),
                                (seta(dv) + " vs. média") if dv is not None else "", spark(m1))))
+    CH = ex.get("churn_usuarios") or []
+    ch_f = [r for r in CH if not r["parcial"]]
+    ch_p = next((r for r in CH if r["parcial"]), None)
+    ch_last = ch_f[-1] if ch_f else None
+    ch_avg = float(np.mean([r["pct"] for r in ch_f[-4:-1]])) if len(ch_f) >= 4 else None
+    st_ch = "info"
+    if ch_last:
+        dv = ch_last["pct"] - ch_avg if ch_avg is not None else None
+        # aqui subir é ruim: a seta fica vermelha quando o churn aumenta
+        st_ch = "info" if dv is None else ("ok" if dv <= 0 else ("warn" if dv <= 5 else "bad"))
+        trend = "" if dv is None else (
+            f'<span class="{"down" if dv > 0.05 else ("up" if dv < -0.05 else "flat")}">'
+            f'{"▲" if dv > 0.05 else ("▼" if dv < -0.05 else "●")} {sinal(dv)} p.p.</span> vs. média dos 3 meses anteriores')
+        F.append(("mau", farol(st_ch, f"Churn de usuários · {ml(ch_last['mes'])}", f"{br(ch_last['pct'])}%",
+                               f"{ni(ch_last['perdidos'])} dos {ni(ch_last['base'])} que assistiram em {ml(_add_mes(ch_last['mes'], -1))} "
+                               f"não assistiram nenhuma aula em {ml(ch_last['mes'])}." + (f" Média dos 3 anteriores: {br(ch_avg)}%." if ch_avg is not None else ""),
+                               trend, spark([r["pct"] for r in ch_f], col="var(--bad)"),
+                               "Gráfico de churn logo abaixo dos faróis")))
     for nome, S, chave in (("Ao Vivo", AV, "notas"), ("Gravado", GV, "notas")):
         if S["rec"] is None:
             continue
@@ -376,6 +431,14 @@ def montar(d, ex, rev_rows):
             aten.append(item("warn", f"<b>{g} perdeu {br((1 - a / b) * 100, 0)}% dos usuários</b> em {ml(ult)} ({ni(b)} → {ni(a)})."))
         elif b and a / b - 1 >= 0.08:
             bem.append(item("ok", f"<b>{g} cresceu {br((a / b - 1) * 100, 0)}%</b> em usuários em {ml(ult)} ({ni(b)} → {ni(a)})."))
+    if ch_last and ch_avg is not None and ch_last["pct"] - ch_avg > 5:
+        aten.append(item("bad" if ch_last["pct"] - ch_avg > 10 else "warn",
+                         f"<b>Churn de usuários subiu para {br(ch_last['pct'])}%</b> em {ml(ch_last['mes'])} "
+                         f"(média dos 3 meses anteriores: {br(ch_avg)}%). {ni(ch_last['perdidos'])} pessoas que assistiram em "
+                         f"{ml(_add_mes(ch_last['mes'], -1))} não voltaram."))
+    elif ch_last and ch_avg is not None and ch_last["pct"] - ch_avg < -5:
+        bem.append(item("ok", f"<b>Churn de usuários caiu para {br(ch_last['pct'])}%</b> em {ml(ch_last['mes'])} "
+                              f"(média dos 3 meses anteriores: {br(ch_avg)}%)."))
     if len(mpct) >= 3 and mpct[-1] < mpct[-2] < mpct[-3]:
         aten.append(item("warn", f"<b>MAU caiu 2 meses seguidos:</b> {br(mpct[-3])}% → {br(mpct[-2])}% → {br(mpct[-1])}%."))
     if proj and meta and proj >= meta:
@@ -388,6 +451,7 @@ def montar(d, ex, rev_rows):
     ph["ATENCAO"] = "".join(aten) or item("ok", "Nenhum ponto crítico pelas regras atuais.")
     ph["BEM"] = "".join(bem) or item("info", "Nada se destacou positivamente neste mês.")
     ph["FAROIS"] = farois
+    ph["CHURN"] = _churn_html(CH, ch_avg)
     ct, us = d["contas"], d["usuarios"]
     card = lambda lab, val, sub, cls="": f'<div class="card"><div class="kpi-label">{lab}</div><div class="kpi-value {cls}">{val}</div><div class="kpi-sub">{sub}</div></div>'
     ph["BASE"] = (card("Contas ativas hoje", ni(ct["ativas"]), f"{br(ct['ativas'] / ct['total'] * 100)}% de {ni(ct['total'])} contas", "green")
@@ -473,6 +537,36 @@ def montar(d, ex, rev_rows):
     for k in ("geral", "pace", "mau", "notas", "consumo", "contas", "dorm"):
         ph["SD_" + k.upper()] = status_aba.get(k, "info")
     return ph
+
+
+def _churn_html(CH, ch_avg):
+    """Bloco da Visão Geral: gráfico de colunas (voltaram x perdidos) + leitura do mês."""
+    if not CH:
+        return '<div class="box"><div class="empty">Ainda não há meses suficientes para calcular o churn de usuários.</div></div>'
+    fech = [r for r in CH if not r["parcial"]]
+    p = next((r for r in CH if r["parcial"]), None)
+    dados = dict(labels=[ml(r["mes"]) + ("*" if r["parcial"] else "") for r in CH],
+                 base=[r["base"] for r in CH], voltaram=[r["voltaram"] for r in CH],
+                 perdidos=[r["perdidos"] for r in CH], pct=[r["pct"] for r in CH],
+                 anterior=[ml(_add_mes(r["mes"], -1)) for r in CH], parcial=bool(p))
+    leitura = ""
+    if fech:
+        u = fech[-1]
+        leitura = (f'<b>{ml(u["mes"])}:</b> de {ni(u["base"])} pessoas que assistiram em {ml(_add_mes(u["mes"], -1))}, '
+                   f'{ni(u["voltaram"])} voltaram e <b>{ni(u["perdidos"])} não voltaram ({br(u["pct"])}%)</b>.'
+                   + (f' Média dos 3 meses anteriores: {br(ch_avg)}%.' if ch_avg is not None else ''))
+    if p:
+        comp = (f' No mesmo ponto de {ml(p["mesmo_ponto_mes"])} (até o dia {p["dia"]}), a perda parcial era {br(p["mesmo_ponto_pct"])}%.'
+                if p.get("mesmo_ponto_pct") is not None else '')
+        leitura += (f'<br><b>{ml(p["mes"])} (em andamento):</b> até agora {ni(p["voltaram"])} de {ni(p["base"])} voltaram, '
+                    f'perda parcial de {br(p["pct"])}%.{comp}')
+    return ('<div class="box">'
+            f'<p class="churn-lead">{leitura}</p>'
+            '<div class="chart-wrap tall"><canvas id="churnCanvas"></canvas></div>'
+            f'<script type="application/json" id="churnDados">{json.dumps(dados, ensure_ascii=False)}</script>'
+            '<p class="note">Cada coluna é a base de quem concluiu ao menos 1 aula no mês anterior: azul = voltou e assistiu '
+            'algo no mês, vermelho = não voltou. O número em cima é o % perdido. * mês em andamento: a perda ainda cai até o '
+            'fim do mês, então compare com “no mesmo ponto do mês passado”, não com os meses fechados.</p></div>')
 
 
 def _add_mes(m, n):

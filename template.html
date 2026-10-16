@@ -155,6 +155,8 @@ td.parcial{color:var(--muted);font-style:italic}
 .toplist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .toplist li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:baseline}
 .toplist .tt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.churn-lead{margin:0 0 10px;font-size:13.5px;color:var(--ink-2);max-width:110ch}
+.churn-lead b{color:var(--ink)}
 </style>
 </head>
 <body>
@@ -199,6 +201,8 @@ td.parcial{color:var(--muted);font-style:italic}
     <div class="kpis base-strip">{{BASE}}</div>
     <div class="sec"><h2>Faróis</h2><span class="n">cada indicador diz se está bom, em atenção ou crítico — e para onde está indo</span></div>
     <div class="farois">{{FAROIS}}</div>
+    <div class="sec"><h2>Churn de usuários</h2><span class="n">dos que assistiram ao menos 1 aula no mês anterior, quantos voltaram no mês seguinte e quantos perdemos</span></div>
+    {{CHURN}}
     <div class="sec"><h2>O que olhar agora</h2><span class="n">gerado automaticamente a partir das regras dos faróis</span></div>
     <div class="cols">
       <div class="box"><h3><span class="chip bad">▼</span>Pontos de atenção</h3><ul class="alerts">{{ATENCAO}}</ul></div>
@@ -621,6 +625,25 @@ try {
           label:c=>' '+c.dataset.label+': '+pc(c.parsed.y)+' — '+n(c.dataset._n[c.dataIndex])+' de '+n(c.dataset._b[c.dataIndex])+' pessoas'}},
         datalabels:{display:true,align:c=>c.datasetIndex?'top':(Math.abs((D.todos[c.dataIndex]||0)-(D.ativos[c.dataIndex]||0))<6?'bottom':'top'),offset:6,font:{size:10.5,weight:'700'},color:c=>c.datasetIndex?'#0E9384':'#1E5EFF',formatter:v=>pc(v)}},
       scales:{y:{beginAtZero:true,ticks:{callback:v=>v+'%'},grid:{color:'rgba(11,30,61,.06)'}},x:{grid:{display:false}}}}});
+})();
+// ================= Visão Geral: churn de usuários (colunas) =================
+(function(){
+  const el=document.getElementById('churnDados'); if(!el) return;
+  const D=JSON.parse(el.textContent); const n=v=>Math.round(v).toLocaleString('pt-BR');
+  const pc=v=>v==null?'—':v.toFixed(1).replace('.',',')+'%'; const last=D.labels.length-1;
+  const cor=(c,i)=>D.parcial&&i===last?c+'66':c;
+  mkChart(document.getElementById('churnCanvas'),{type:'bar',
+    data:{labels:D.labels,datasets:[
+      {label:'Voltaram',data:D.voltaram,backgroundColor:D.labels.map((_,i)=>cor('#1E5EFF',i)),borderWidth:0,stack:'a',borderRadius:{bottomLeft:4,bottomRight:4}},
+      {label:'Não voltaram (perdidos)',data:D.perdidos,backgroundColor:D.labels.map((_,i)=>cor('#C2352B',i)),borderWidth:0,stack:'a',borderRadius:{topLeft:4,topRight:4}}]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},layout:{padding:{top:24}},
+      plugins:{legend:{position:'bottom',labels:{usePointStyle:true,boxWidth:8}},
+        tooltip:{callbacks:{title:i=>i[0].label+(D.parcial&&i[0].dataIndex===last?' (em andamento)':''),
+          label:c=>' '+c.dataset.label+': '+n(c.parsed.y)+' pessoas',
+          footer:i=>'Base: '+n(D.base[i[0].dataIndex])+' que assistiram em '+D.anterior[i[0].dataIndex]+' · perda '+pc(D.pct[i[0].dataIndex])}},
+        datalabels:{display:c=>c.datasetIndex===1,anchor:'end',align:'top',offset:2,font:{size:10.5,weight:'700'},
+          color:c=>D.parcial&&c.dataIndex===last?'#6B7F9E':'#C2352B',formatter:(v,c)=>pc(D.pct[c.dataIndex])}},
+      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,beginAtZero:true,grid:{color:'rgba(11,30,61,.06)'},ticks:{callback:v=>n(v)}}}}});
 })();
 // ================= Consumo por Grupo: aulas concluídas mês a mês =================
 (function(){
