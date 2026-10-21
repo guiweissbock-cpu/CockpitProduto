@@ -244,7 +244,9 @@ def churn_usuarios(c, hoje, mes_atual, n_meses=12, contratos=None, usuarios=None
       - sai quem é de empresa sem contrato vigente no fim do mês (cancelou) — isso já
         aparece no churn de contas e não é perda de engajamento;
       - sai quem teve o acesso removido até o fim do mês (data de saída da Waid,
-        registrada desde out/26; no mês em andamento também quem está inativo hoje).
+        registrada desde out/26; no mês em andamento também quem está inativo hoje);
+      - quem voltou a assistir no mês continua na base como "voltou", mesmo que o acesso
+        tenha acabado depois (só sai quem perdeu o acesso e não voltou).
 
     O mês em andamento sempre parece pior (ainda tem dias pela frente), então
     para ele também calculamos o mesmo recorte do mês anterior até o mesmo dia
@@ -304,7 +306,8 @@ def churn_usuarios(c, hoje, mes_atual, n_meses=12, contratos=None, usuarios=None
         if _add_mes(ant, 1) != m:  # buraco na série: sem mês anterior de verdade
             continue
         bruta = por_mes[ant]
-        base = {e for e in bruta if podia_voltar(e, m)}
+        # quem voltou conta como voltou; sai da base só quem perdeu o acesso e não voltou
+        base = {e for e in bruta if e in por_mes[m] or podia_voltar(e, m)}
         if not base:
             continue
         volt = len(base & por_mes[m])
@@ -317,8 +320,8 @@ def churn_usuarios(c, hoje, mes_atual, n_meses=12, contratos=None, usuarios=None
         # mesmo ponto do mês passado: base de 2 meses atrás x quem voltou até o mesmo dia
         dia = hoje.day
         m_ant = fechados[-1]["mes"]
-        base_ant = {e for e in por_mes.get(_add_mes(m_ant, -1), set()) if podia_voltar(e, m_ant)}
         ate_dia = set(c.loc[(c["mes"] == m_ant) & (c["data"].dt.day <= dia), "Email"])
+        base_ant = {e for e in por_mes.get(_add_mes(m_ant, -1), set()) if e in ate_dia or podia_voltar(e, m_ant)}
         if base_ant:
             parcial["mesmo_ponto_pct"] = round((len(base_ant) - len(base_ant & ate_dia)) / len(base_ant) * 100, 1)
             parcial["mesmo_ponto_mes"] = m_ant
