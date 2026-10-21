@@ -1350,7 +1350,7 @@ def main():
     import traceback
     import paineis
     try:
-        extras = paineis.calcular_extras(cp, usuarios, contas, TODAY, MES_ATUAL, ULTIMO_MES_FECHADO)
+        extras = paineis.calcular_extras(cp, usuarios, contas, TODAY, MES_ATUAL, ULTIMO_MES_FECHADO, contratos=contratos)
         rev_rows = paineis.reviews_com_acesso(reviews_detalhe, reviews_detalhe_vivo, usuarios, grupos_acesso_do_usuario)
         pedacos = paineis.montar(master, extras, rev_rows)
     except Exception:

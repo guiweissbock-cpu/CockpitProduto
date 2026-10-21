@@ -121,7 +121,7 @@ def linechart(meses, series, lo=None, hi=None, fmt=lambda v: br(v, 1) + "%", par
 
 
 # ------------------------------------------------------------ cálculos extras
-def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado):
+def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contratos=None):
     """Métricas novas que dependem do consumo aula a aula."""
     ex = {}
     c = cp.dropna(subset=["Email"]).copy()
@@ -218,41 +218,106 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado):
                          inativos_viram=i_viu, viram_ativos=a_viu, mau_ativos=mau_at, mau_todos=mau_todos,
                          mau_3m=base3, dias=dias, ativacao=ativ, score=score))
     sem_user = [nome.get(cid, cid) for cid in ativas if cid not in set(uu["conta"])]
-    ex["churn_usuarios"] = churn_usuarios(c, hoje, mes_atual)
+    ex["churn_usuarios"] = churn_usuarios(c, hoje, mes_atual, contratos=contratos, usuarios=usuarios)
     ex["contas"] = rows
     ex["contas_sem_usuario"] = sorted(sem_user)
     ex["ult"], ex["ant"] = ult, ant
     return ex
 
 
-def churn_usuarios(c, hoje, mes_atual, n_meses=12):
+# Mês a partir do qual a data de saída de cada pessoa é registrada (sync com a Waid desde 15/10/2026).
+# Antes disso só sabemos se a pessoa está inativa HOJE, o que não diz se ela já tinha saído naquele mês.
+MES_INICIO_DATA_SAIDA = "2026-10"
+
+
+def _fim_mes(m):
+    """Último instante do mês 'AAAA-MM' (UTC-naive), para comparar com datas de contrato/saída."""
+    return pd.Timestamp(_add_mes(m, 1) + "-01") - pd.Timedelta(seconds=1)
+
+
+def churn_usuarios(c, hoje, mes_atual, n_meses=12, contratos=None, usuarios=None):
     """Churn de usuários mês a mês: dos que concluíram ao menos 1 aula no mês
     anterior (base), quantos concluíram ao menos 1 aula no mês (voltaram) e
     quantos não (perdidos). Últimos `n_meses` fechados + o mês em andamento.
+
+    Só entra na base quem ainda PODIA voltar no mês:
+      - sai quem é de empresa sem contrato vigente no fim do mês (cancelou) — isso já
+        aparece no churn de contas e não é perda de engajamento;
+      - sai quem teve o acesso removido até o fim do mês (data de saída da Waid,
+        registrada desde out/26; no mês em andamento também quem está inativo hoje).
 
     O mês em andamento sempre parece pior (ainda tem dias pela frente), então
     para ele também calculamos o mesmo recorte do mês anterior até o mesmo dia
     ("no mesmo ponto do mês passado"), que é a comparação justa."""
     por_mes = c.groupby("mes")["Email"].apply(set)
     meses = sorted(por_mes.index)
+    hoje_ts = pd.Timestamp(hoje).tz_localize(None) if getattr(pd.Timestamp(hoje), "tzinfo", None) else pd.Timestamp(hoje)
+
+    # empresa de cada pessoa (a do cadastro) e contratos de cada empresa: [(início, fim ou None)]
+    conta_de = {}
+    if "id_conta" in c.columns:
+        conta_de = c.dropna(subset=["id_conta"]).drop_duplicates("Email").set_index("Email")["id_conta"].to_dict()
+    vig = {}
+    if contratos is not None and len(contratos):
+        for cid, ini, fim in zip(contratos["conta_id"], contratos["data_assinatura"], contratos["data_churn"]):
+            ini = pd.to_datetime(ini, errors="coerce", utc=True)
+            fim = pd.to_datetime(fim, errors="coerce", utc=True)
+            vig.setdefault(str(cid).replace(".0", ""), []).append(
+                (None if pd.isna(ini) else ini.tz_localize(None), None if pd.isna(fim) else fim.tz_localize(None)))
+
+    def conta_ativa(email, quando):
+        cid = conta_de.get(email)
+        if cid is None or pd.isna(cid):
+            return True  # sem empresa conhecida: não dá para afirmar que saiu
+        cs = vig.get(str(cid).replace(".0", ""))
+        if not cs:
+            return True
+        return any((i is None or i <= quando) and (f is None or f >= quando) for i, f in cs)
+
+    # saída de cada pessoa: data registrada; e quem está inativo hoje
+    saida, inativo = {}, set()
+    if usuarios is not None and len(usuarios):
+        u = usuarios.copy()
+        u["email"] = u["email"].astype(str).str.strip().str.lower()
+        ativo = u.groupby("email")["usuario_ativo"].max() if "usuario_ativo" in u.columns else pd.Series(dtype=bool)
+        inativo = set(ativo[~ativo.astype(bool)].index)
+        if "data_saida" in u.columns:
+            ds = pd.to_datetime(u["data_saida"], errors="coerce")
+            u = u.assign(_ds=ds).dropna(subset=["_ds"])
+            # vale a saída só de quem está inativo hoje (quem voltou a ter acesso não saiu)
+            saida = {e: d for e, d in u.groupby("email")["_ds"].max().items() if e in inativo}
+
+    def podia_voltar(email, m):
+        quando = min(_fim_mes(m), hoje_ts)
+        if not conta_ativa(email, quando):
+            return False
+        d = saida.get(email)
+        if d is not None and d <= quando:
+            return False
+        if m >= MES_INICIO_DATA_SAIDA and m == mes_atual and email in inativo and d is None:
+            return False  # inativo hoje, saiu antes de a data ser registrada
+        return True
+
     linhas = []
     for i in range(1, len(meses)):
         m, ant = meses[i], meses[i - 1]
         if _add_mes(ant, 1) != m:  # buraco na série: sem mês anterior de verdade
             continue
-        base = por_mes[ant]
+        bruta = por_mes[ant]
+        base = {e for e in bruta if podia_voltar(e, m)}
         if not base:
             continue
         volt = len(base & por_mes[m])
         linhas.append(dict(mes=m, base=len(base), voltaram=volt, perdidos=len(base) - volt,
-                           pct=round((len(base) - volt) / len(base) * 100, 1), parcial=(m == mes_atual)))
+                           pct=round((len(base) - volt) / len(base) * 100, 1), parcial=(m == mes_atual),
+                           sem_acesso=len(bruta) - len(base)))
     fechados = [r for r in linhas if not r["parcial"]][-n_meses:]
     parcial = next((r for r in linhas if r["parcial"]), None)
     if parcial and len(fechados) >= 2:
         # mesmo ponto do mês passado: base de 2 meses atrás x quem voltou até o mesmo dia
         dia = hoje.day
         m_ant = fechados[-1]["mes"]
-        base_ant = por_mes.get(_add_mes(m_ant, -1), set())
+        base_ant = {e for e in por_mes.get(_add_mes(m_ant, -1), set()) if podia_voltar(e, m_ant)}
         ate_dia = set(c.loc[(c["mes"] == m_ant) & (c["data"].dt.day <= dia), "Email"])
         if base_ant:
             parcial["mesmo_ponto_pct"] = round((len(base_ant) - len(base_ant & ate_dia)) / len(base_ant) * 100, 1)
@@ -552,8 +617,10 @@ def _churn_html(CH, ch_avg):
     leitura = ""
     if fech:
         u = fech[-1]
-        leitura = (f'<b>{ml(u["mes"])}:</b> de {ni(u["base"])} pessoas que assistiram em {ml(_add_mes(u["mes"], -1))}, '
+        leitura = (f'<b>{ml(u["mes"])}:</b> de {ni(u["base"])} pessoas que assistiram em {ml(_add_mes(u["mes"], -1))} e continuavam com acesso, '
                    f'{ni(u["voltaram"])} voltaram e <b>{ni(u["perdidos"])} não voltaram ({br(u["pct"])}%)</b>.'
+                   + (f' Ficaram fora da base {ni(u["sem_acesso"])} pessoas que perderam o acesso (empresa cancelou ou acesso removido).'
+                      if u.get("sem_acesso") else '')
                    + (f' Média dos 3 meses anteriores: {br(ch_avg)}%.' if ch_avg is not None else ''))
     if p:
         comp = (f' No mesmo ponto de {ml(p["mesmo_ponto_mes"])} (até o dia {p["dia"]}), a perda parcial era {br(p["mesmo_ponto_pct"])}%.'
@@ -564,7 +631,9 @@ def _churn_html(CH, ch_avg):
             f'<p class="churn-lead">{leitura}</p>'
             '<div class="chart-wrap tall"><canvas id="churnCanvas"></canvas></div>'
             f'<script type="application/json" id="churnDados">{json.dumps(dados, ensure_ascii=False)}</script>'
-            '<p class="note">Cada coluna é a base de quem concluiu ao menos 1 aula no mês anterior: azul = voltou e assistiu '
+            '<p class="note">Cada coluna é a base de quem concluiu ao menos 1 aula no mês anterior e ainda tinha acesso no mês '
+            '(saem da base as pessoas de empresas que cancelaram, que já entram no churn de contas, e quem teve o acesso '
+            'removido; a data de remoção é registrada desde out/26). Azul = voltou e assistiu '
             'algo no mês, vermelho = não voltou. O número em cima é o % perdido. * mês em andamento: a perda ainda cai até o '
             'fim do mês, então compare com “no mesmo ponto do mês passado”, não com os meses fechados.</p></div>')
 
