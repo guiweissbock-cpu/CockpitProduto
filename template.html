@@ -149,6 +149,16 @@ tr:last-child td{border-bottom:0}
 #tabelaPaceGrupos tr[data-grupo]{cursor:pointer}#tabelaPaceGrupos tr[data-grupo]:hover td{background:var(--blue-soft)}
 #tabelaPaceGrupos tr.sel td{background:var(--panel-2);font-weight:600}
 #tabelaPaceGrupos td.num,#tabelaPaceGrupos th.num{text-align:right;font-variant-numeric:tabular-nums}
+#tabelaPaceDia{border-collapse:separate;border-spacing:2px;font-size:11.5px}
+#tabelaPaceDia th,#tabelaPaceDia td{padding:5px 6px;text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums;border:0}
+#tabelaPaceDia th:first-child,#tabelaPaceDia td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;font-weight:600;padding-right:12px}
+#tabelaPaceDia td.c{border-radius:5px;font-weight:600;min-width:38px}
+#tabelaPaceDia td.c.ok{background:var(--ok-bg);color:var(--ok)}#tabelaPaceDia td.c.warn{background:var(--warn-bg);color:var(--warn)}#tabelaPaceDia td.c.bad{background:var(--bad-bg);color:var(--bad)}#tabelaPaceDia td.c.na{background:var(--panel-2);color:var(--muted)}
+#tabelaPaceDia td.tend{font-weight:700;padding-left:12px}
+#tabelaPaceDia th:last-child,#tabelaPaceDia td.tend{position:sticky;right:0;background:var(--panel);z-index:1;box-shadow:-6px 0 6px -4px rgba(11,30,61,.12)}
+.seg-pace{display:inline-flex;border:1px solid var(--line,#e3e8f2);border-radius:999px;overflow:hidden}
+.seg-pace button{border:0;background:transparent;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;color:var(--muted)}
+.seg-pace button.on{background:var(--blue-soft);color:var(--ink);font-weight:650}
 td.parcial{color:var(--muted);font-style:italic}
 .base-strip{margin-bottom:6px}
 .base-strip .card .kpi-value{font-size:24px}
@@ -232,6 +242,19 @@ td.parcial{color:var(--muted);font-style:italic}
       <button class="download-btn" data-table="tabelaPaceGrupos" data-filename="pace_mau_grupos.csv">⬇ Baixar CSV</button>
     </div>
     <div class="table-wrap no-max chart-card"><table id="tabelaPaceGrupos"></table></div>
+
+    <div class="section-title">Dia a dia por grupo <span class="n" id="pace-dia-sub">cada célula = situação do grupo ao fim daquele dia · verde no ritmo, amarelo atenção, vermelho abaixo</span></div>
+    <div class="card-head" style="justify-content:space-between; margin-bottom:8px; gap:10px; flex-wrap:wrap;">
+      <div class="seg-pace" id="segPaceDia">
+        <button data-m="gap" class="on">Gap vs. pace (p.p.)</button>
+        <button data-m="pct">% do esperado</button>
+        <button data-m="real">Realizado acumulado</button>
+        <button data-m="novos">Novos usuários no dia</button>
+      </div>
+      <button class="download-btn" data-table="tabelaPaceDia" data-filename="pace_mau_dia_a_dia.csv">⬇ Baixar CSV</button>
+    </div>
+    <div class="table-wrap no-max chart-card"><table id="tabelaPaceDia"></table></div>
+    <p class="note" id="pace-dia-nota"></p>
 
     <div class="section-title">Meta vs. realizado mês a mês <span class="n" id="pace-mensal-sub"></span></div>
     <div class="chart-card">
@@ -477,6 +500,63 @@ try {
     paceCharts = [];
   }
 
+  // situação do grupo ao fim do dia i (1..d)
+  function noDia(b, i){
+    const meta = (b.metas && b.metas[P.mes]!=null) ? b.metas[P.mes] : null;
+    const real = b.diario[i-1];
+    const esp = meta!=null ? meta*P.curva[i-1] : null;
+    const gap = esp!=null ? real-esp : null;
+    const ratio = (esp && esp>0) ? real/esp : null;
+    const novos = b.diario_n[i-1] - (i>1 ? b.diario_n[i-2] : 0);
+    return {real, esp, gap, ratio, novos};
+  }
+  function tend(b){
+    if (d<2) return null;
+    const ini = Math.max(1, d-7);
+    const a = noDia(b, ini), z = noDia(b, d);
+    if (a.gap==null || z.gap==null) return null;
+    return {delta: z.gap - a.gap, dias: d-ini};
+  }
+  function tendTxt(b){
+    const t = tend(b); if (!t) return '—';
+    const v = t.delta, cor = Math.abs(v)<0.3 ? 'var(--muted)' : (v>0 ? 'var(--ok)' : 'var(--bad)');
+    const seta = Math.abs(v)<0.3 ? '→' : (v>0 ? '↗' : '↘');
+    return `<span style="color:${cor};font-weight:650" title="gap ${t.dias} dias atrás → hoje">${seta} ${ppSigned(v)}</span>`;
+  }
+  let modoDia = 'gap';
+  function renderDia(selecionado){
+    const tb = document.getElementById('tabelaPaceDia');
+    if (d<1){ tb.innerHTML = '<tr><td>Mês começando — ainda sem dias completos.</td></tr>'; return; }
+    const dias = Array.from({length:d}, (_,i)=>i+1);
+    const ordem = [P.grupos[0], ...P.grupos.slice(1).sort((x,y)=>{
+      const a=calc(x).ratio, b=calc(y).ratio; if(a==null) return 1; if(b==null) return -1; return a-b; })];
+    const cel = (b,i)=>{
+      const x = noDia(b,i), st = status(x.ratio).cls;
+      let v;
+      if (modoDia==='gap') v = x.gap==null ? '—' : (x.gap>=0?'+':'')+x.gap.toFixed(1).replace('.',',');
+      else if (modoDia==='pct') v = x.ratio==null ? '—' : Math.round(x.ratio*100)+'%';
+      else if (modoDia==='real') v = x.real==null ? '—' : x.real.toFixed(1).replace('.',',')+'%';
+      else v = fmt(x.novos);
+      const tip = `${b.grupo} · ${String(i).padStart(2,'0')}/${P.mes.slice(5)}: realizado ${pp(x.real)} (${fmt(b.diario_n[i-1])}) · esperado ${pp(x.esp)} · gap ${ppSigned(x.gap)} · +${fmt(x.novos)} novos no dia`;
+      return `<td class="c ${modoDia==='novos'?'na':st}" title="${tip}">${v}</td>`;
+    };
+    tb.innerHTML = `<tr><th>Grupo de acesso</th>${dias.map(i=>`<th>${String(i).padStart(2,'0')}/${P.mes.slice(5)}</th>`).join('')}<th>Tendência 7 dias</th></tr>
+      ${ordem.map(b=>`<tr><td${b.grupo===selecionado?' style="color:var(--blue)"':''}>${b.grupo}</td>${dias.map(i=>cel(b,i)).join('')}<td class="tend">${tendTxt(b)}</td></tr>`).join('')}`;
+    const wrap = tb.parentElement; wrap.scrollLeft = wrap.scrollWidth;
+    const notas = {
+      gap:'Gap vs. pace = realizado acumulado − pace esperado naquele dia, em pontos percentuais. Se o número vai subindo de um dia para o outro, o grupo está acelerando e entrando no ritmo.',
+      pct:'% do esperado = realizado ÷ pace esperado naquele dia. 100% ou mais = no ritmo; 90–99% = atenção.',
+      real:'Realizado acumulado = % da base ativa do grupo com pelo menos 1 aula concluída no mês até aquele dia. A cor compara com o pace esperado do dia.',
+      novos:'Novos usuários no dia = pessoas do grupo que concluíram a 1ª aula do mês naquele dia (é o que faz o MAU andar).'
+    };
+    document.getElementById('pace-dia-nota').innerHTML = notas[modoDia] + ' <b>Tendência 7 dias</b> = quanto o gap mudou na última semana (↗ recuperando, ↘ perdendo ritmo).';
+  }
+  document.querySelectorAll('#segPaceDia button').forEach(bt=>{
+    bt.onclick = ()=>{ modoDia = bt.dataset.m;
+      document.querySelectorAll('#segPaceDia button').forEach(x=>x.classList.toggle('on', x===bt));
+      renderDia(sel.value); };
+  });
+
   function renderTabela(selecionado){
     const linhas = P.grupos.map(b=>({b, c:calc(b)}));
     const base = linhas[0];
@@ -484,7 +564,7 @@ try {
       if (x.c.ratio==null) return 1; if (y.c.ratio==null) return -1; return x.c.ratio - y.c.ratio;
     });
     document.getElementById('tabelaPaceGrupos').innerHTML = `
-      <tr><th>Grupo de acesso</th><th class="num">Base ativa</th><th class="num">Meta ${mesLabel(P.mes)}</th><th class="num">Pace esperado hoje</th><th class="num">Realizado hoje</th><th class="num">Gap vs. pace</th><th class="num">Projeção de fechamento</th><th class="num">Faltam p/ meta</th><th>Status</th></tr>
+      <tr><th>Grupo de acesso</th><th class="num">Base ativa</th><th class="num">Meta ${mesLabel(P.mes)}</th><th class="num">Pace esperado hoje</th><th class="num">Realizado hoje</th><th class="num">Gap vs. pace</th><th class="num">Projeção de fechamento</th><th class="num">Faltam p/ meta</th><th class="num" title="Quanto o gap vs. pace mudou nos últimos 7 dias">Tendência 7 dias</th><th>Status</th></tr>
       ${[base, ...resto].map(({b,c})=>{
         const st = status(c.ratio);
         const gapCor = c.gap==null ? 'var(--ink-dim)' : (c.gap>=0 ? 'var(--green)' : 'var(--red)');
@@ -498,6 +578,7 @@ try {
           <td class="num" style="color:${gapCor}">${ppSigned(c.gap)}</td>
           <td class="num">${pp(c.projecao)}</td>
           <td class="num">${c.faltam==null?'—':fmt(c.faltam)+' usuários'}</td>
+          <td class="num">${tendTxt(b)}</td>
           <td><span class="pill ${st.cls}">${st.txt}</span></td>
         </tr>`;
       }).join('')}
@@ -601,6 +682,7 @@ try {
     }));
 
     renderTabela(b.grupo);
+    renderDia(b.grupo);
   }
 
   sel.onchange = ()=>render(sel.value); // onchange (não addEventListener): boot() pode rodar 2x
