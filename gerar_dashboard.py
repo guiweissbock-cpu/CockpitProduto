@@ -275,6 +275,9 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
         print(f"  ({int(fora.sum())} usuarios de contas fora da analise removidos)")
     usuarios = usuarios[~fora].copy()
     usuarios["data_criacao"] = pd.to_datetime(usuarios["data_criacao"], errors="coerce")
+    # data_saida: dia da ultima inativacao na Waid (historico WAID-6422, desde 13/02/2026;
+    # a sincronizacao horaria continua preenchendo). Vazia para quem esta ativo.
+    usuarios["data_saida"] = pd.to_datetime(usuarios["data_saida"] if "data_saida" in usuarios.columns else pd.NaT, errors="coerce")
     usuarios["status_conta"] = usuarios["id_conta"].map(conta_status_map)
     usuarios["nome_conta"] = usuarios["id_conta"].map(conta_nome_map)
     usuarios["csm"] = usuarios["id_conta"].map(conta_csm_map)
@@ -292,6 +295,26 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
         "total": int(len(usuarios)),
     }
     return usuarios, resumo
+
+
+# Base do MAU de cada mes: quem ja estava cadastrado ate o fim do mes e nao tinha saido antes
+# do inicio dele (mesmo criterio do cockpit de CS). Antes de HISTORICO_INATIV_DESDE nao ha
+# historico de inativacao confiavel (a Waid so enviou a partir de 13/02/2026), entao esses meses
+# seguem usando a base de usuarios ativos hoje.
+HISTORICO_INATIV_DESDE = "2026-03"
+
+
+def um_por_email(usuarios):
+    return usuarios.sort_values("usuario_ativo", ascending=False).drop_duplicates(subset="email").copy()
+
+
+def base_do_mes(un, mes):
+    if mes < HISTORICO_INATIV_DESDE:
+        return set(un.loc[un["usuario_ativo"], "email"])
+    p = pd.Period(mes, "M")
+    ini, fim = p.start_time, p.end_time.normalize()
+    ok = (un["data_criacao"].isna() | (un["data_criacao"] <= fim)) & (un["usuario_ativo"] | (un["data_saida"] >= ini))
+    return set(un.loc[ok, "email"])
 
 
 # ---------------------------------------------------------------
@@ -811,11 +834,13 @@ def _curva_pace(dias_por_mes_ativos, meses, dias_mes_atual):
 def mau_pace(cp, usuarios):
     metas_globais, metas_manuais = _ler_metas()
 
-    ativos = usuarios[usuarios["usuario_ativo"]].drop_duplicates(subset="email").copy()
-    ativos["grupos"] = ativos["grupo_acesso"].apply(grupos_acesso_do_usuario)
-    email_grupos = ativos.set_index("email")["grupos"].to_dict()
+    # todos os usuarios (inclusive quem ja saiu): cada mes usa a base de quem estava la naquele mes
+    un = um_por_email(usuarios)
+    un["grupos"] = un["grupo_acesso"].apply(grupos_acesso_do_usuario)
+    email_grupos = un.set_index("email")["grupos"].to_dict()
+    ativos_set = set(un.loc[un["usuario_ativo"], "email"])
 
-    # consumo so de quem e da base ativa, ate o fim de ONTEM (o dia de hoje
+    # consumo de quem esta (ou esteve) na base, ate o fim de ONTEM (o dia de hoje
     # ainda esta em andamento e distorceria a comparacao com a curva)
     c = cp.dropna(subset=["Email"])
     c = c[c["Email"].isin(email_grupos.keys()) & (c["data"] < TODAY)][["Email", "data", "mes"]].copy()
@@ -838,13 +863,18 @@ def mau_pace(cp, usuarios):
     meses_hist = meses_fechados[-12:] + [mes_pace]
     base_meses_baseline = meses_fechados[-PACE_MESES_BASELINE:]
 
-    def serie(emails_grupo, base):
-        prim = primeiro[primeiro["Email"].isin(emails_grupo)]
+    base_sets = {m: base_do_mes(un, m) for m in meses_hist}
+    base_sets[mes_pace] = ativos_set  # mes corrente: base de hoje (usuarios ativos)
+
+    def serie(emails_grupo):
+        base = len(emails_grupo & ativos_set)
         hist = []
         for m in meses_hist:
-            n = int((prim["mes"] == m).sum())
-            hist.append({"mes": m, "mau": n, "pct": round(n / base * 100, 2) if base else None})
-        atual = prim.loc[prim["mes"] == mes_pace, "dia"]
+            e_m = emails_grupo & base_sets[m]
+            n = int(((primeiro["mes"] == m) & primeiro["Email"].isin(e_m)).sum())
+            hist.append({"mes": m, "mau": n, "base": len(e_m), "pct": round(n / len(e_m) * 100, 2) if e_m else None})
+        prim_a = primeiro[primeiro["Email"].isin(emails_grupo & ativos_set)]
+        atual = prim_a.loc[prim_a["mes"] == mes_pace, "dia"]
         cont = np.bincount(atual.values, minlength=dias_mes + 1)[1:dias_mes + 1]
         acum = np.cumsum(cont)[:max(dia_ref, 0)]
         diario = [round(float(x) / base * 100, 2) if base else None for x in acum]
@@ -854,9 +884,9 @@ def mau_pace(cp, usuarios):
 
     blocos = []
     todos = set(email_grupos.keys())
-    hist_t, diario_t, diario_n_t, baseline_t = serie(todos, len(todos))
+    hist_t, diario_t, diario_n_t, baseline_t = serie(todos)
     blocos.append({
-        "grupo": "Base inteira", "base_ativa": len(todos), "indice": 1.0,
+        "grupo": "Base inteira", "base_ativa": len(todos & ativos_set), "indice": 1.0,
         "amostra_pequena": False, "meta_origem": "global",
         "metas": dict(metas_globais), "historico": hist_t, "diario": diario_t,
         "diario_n": diario_n_t, "baseline_pct": round(baseline_t, 2) if baseline_t else None,
@@ -864,10 +894,10 @@ def mau_pace(cp, usuarios):
 
     for g in GRUPOS_ACESSO:
         emails_g = {e for e, gs in email_grupos.items() if g in gs}
-        base_g = len(emails_g)
+        base_g = len(emails_g & ativos_set)
         if base_g == 0:
             continue
-        hist_g, diario_g, diario_n_g, baseline_g = serie(emails_g, base_g)
+        hist_g, diario_g, diario_n_g, baseline_g = serie(emails_g)
         # Meta automatica do grupo: aplica sobre a meta global o "peso" historico
         # do grupo (MAU% medio do grupo / MAU% medio da base nos ultimos meses
         # fechados). Grupo que historicamente engaja acima da media tem meta
@@ -887,7 +917,7 @@ def mau_pace(cp, usuarios):
         })
 
     print(f"  (PACE MAU: {mes_pace}, dia {dia_ref}/{dias_mes}, curva de {len(meses_curva)} meses, "
-          f"base ativa {len(todos)}, {len(blocos) - 1} grupos de acesso, "
+          f"base ativa {len(todos & ativos_set)}, {len(blocos) - 1} grupos de acesso, "
           f"{len(metas_globais)} metas globais)")
     return {
         "mes": mes_pace,
@@ -1124,10 +1154,14 @@ def dormentes(usuarios, cp):
 def empresas_ativas(usuarios, cp, contas, conta_csm_map):
     consumo_mes_email = cp[cp["mes"] == ULTIMO_MES_FECHADO].groupby("Email").size()
     usuarios = usuarios.copy()
-    usuarios["ativo_mes_ref"] = usuarios["email"].isin(consumo_mes_email.index)
+    # base da conta no ultimo mes fechado: quem estava la naquele mes (nao a base de hoje)
+    base_ref = base_do_mes(um_por_email(usuarios), ULTIMO_MES_FECHADO)
+    usuarios["na_base_mes_ref"] = usuarios["email"].isin(base_ref)
+    usuarios["ativo_mes_ref"] = usuarios["na_base_mes_ref"] & usuarios["email"].isin(consumo_mes_email.index)
 
     por_conta = usuarios.groupby("id_conta").agg(
         total_usuarios=("id", "count"),
+        base_mes=("na_base_mes_ref", "sum"),
         usuarios_ativos_mes=("ativo_mes_ref", "sum"),
     ).reset_index()
 
@@ -1138,11 +1172,12 @@ def empresas_ativas(usuarios, cp, contas, conta_csm_map):
     )
     ativas = ativas_base.merge(por_conta, on="id_conta", how="left")
     ativas["total_usuarios"] = ativas["total_usuarios"].fillna(0).astype(int)
+    ativas["base_mes"] = ativas["base_mes"].fillna(0).astype(int)
     ativas["usuarios_ativos_mes"] = ativas["usuarios_ativos_mes"].fillna(0).astype(int)
     ativas["csm"] = ativas["id_conta"].map(conta_csm_map).fillna("—")
     ativas["mau_pct"] = np.where(
-        ativas["total_usuarios"] > 0,
-        (ativas["usuarios_ativos_mes"] / ativas["total_usuarios"] * 100).round(1),
+        ativas["base_mes"] > 0,
+        (ativas["usuarios_ativos_mes"] / ativas["base_mes"] * 100).round(1),
         0.0,
     )
     return ativas.sort_values("mau_pct", ascending=False)
@@ -1277,10 +1312,17 @@ def main():
     # MAU como % da base de usuarios ativos
     mau_ativos_map = mau_mes_ativos.set_index("mes")["mau_ativos"].to_dict()
     mau_mes_list = mau_mes.to_dict("records")
+    # MAU % = quem assistiu no mes DENTRO da base daquele mes / tamanho da base daquele mes
+    # (cadastrado ate o fim do mes e sem ter saido antes do inicio dele). Mes corrente: base de hoje.
+    un_mau = um_por_email(usuarios)
+    emails_mes = cp.dropna(subset=["Email"]).groupby("mes")["Email"].agg(lambda x: set(x))
+    ativos_hoje = set(un_mau.loc[un_mau["usuario_ativo"], "email"])
     for r in mau_mes_list:
-        r["mau_pct_da_base_ativa"] = (
-            round(r["mau"] / usuarios_resumo["ativos"] * 100, 1) if usuarios_resumo["ativos"] else None
-        )
+        base_m = ativos_hoje if r["mes"] == MES_ATUAL else base_do_mes(un_mau, r["mes"])
+        na_base = len(emails_mes.get(r["mes"], set()) & base_m)
+        r["base_mes"] = len(base_m)
+        r["mau_na_base"] = na_base
+        r["mau_pct_da_base_ativa"] = round(na_base / len(base_m) * 100, 1) if base_m else None
         # MAU só de quem tem conta ativa hoje (subconjunto do MAU total acima) -- deixa
         # visivel quanto do consumo vem de gente que já saiu da base.
         r["mau_ativos"] = int(mau_ativos_map.get(r["mes"], 0))
@@ -1350,7 +1392,7 @@ def main():
     import traceback
     import paineis
     try:
-        extras = paineis.calcular_extras(cp, usuarios, contas, TODAY, MES_ATUAL, ULTIMO_MES_FECHADO, contratos=contratos)
+        extras = paineis.calcular_extras(cp, usuarios, contas, TODAY, MES_ATUAL, ULTIMO_MES_FECHADO, contratos=contratos, base_fn=base_do_mes)
         rev_rows = paineis.reviews_com_acesso(reviews_detalhe, reviews_detalhe_vivo, usuarios, grupos_acesso_do_usuario)
         pedacos = paineis.montar(master, extras, rev_rows)
     except Exception:

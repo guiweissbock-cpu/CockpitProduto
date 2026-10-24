@@ -121,7 +121,7 @@ def linechart(meses, series, lo=None, hi=None, fmt=lambda v: br(v, 1) + "%", par
 
 
 # ------------------------------------------------------------ cálculos extras
-def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contratos=None):
+def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contratos=None, base_fn=None):
     """Métricas novas que dependem do consumo aula a aula."""
     ex = {}
     c = cp.dropna(subset=["Email"]).copy()
@@ -192,6 +192,8 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contrato
     ultimo_cons = c.groupby("Email")["data"].max()
     ja_cons = set(c["Email"])
     rows = []
+    _un = usuarios.sort_values("usuario_ativo", ascending=False).drop_duplicates(subset="email")
+    base_mes_g = {m: base_fn(_un, m) for m in meses_f[-4:]} if base_fn else {}
     for conta, g in uu.groupby("conta"):
         at_em = set(g.loc[g["usuario_ativo"], "email"])
         in_em = set(g.loc[~g["usuario_ativo"], "email"])
@@ -199,9 +201,13 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contrato
         viu = por_mes.get(ult, set())
         a_viu = len(at_em & viu)
         i_viu = len(in_em & viu)
-        mau_at = a_viu / n_at * 100 if n_at else None
+        # base da conta em cada mes (quem estava la naquele mes), em vez da base de hoje
+        todos_em = at_em | in_em
+        bm = (lambda m: todos_em & base_mes_g[m]) if base_fn else (lambda m: at_em)
+        b_ult = bm(ult)
+        mau_at = len(b_ult & viu) / len(b_ult) * 100 if b_ult else None
         mau_todos = (a_viu + i_viu) / (n_at + i_viu) * 100 if (n_at + i_viu) else None
-        hist = [len(at_em & por_mes[m]) / n_at * 100 if n_at and m in por_mes else None for m in meses_f[-4:-1]]
+        hist = [len(bm(m) & por_mes[m]) / len(bm(m)) * 100 if bm(m) and m in por_mes else None for m in meses_f[-4:-1]]
         hist = [h for h in hist if h is not None]
         base3 = float(np.mean(hist)) if hist else None
         ult_c = max([ultimo_cons.get(e) for e in at_em | in_em if e in ultimo_cons.index] or [pd.NaT])
@@ -368,7 +374,7 @@ def montar(d, ex, rev_rows):
     mm = [r for r in d["mau_mes"] if r["mes"] < d["meta"]["mes_parcial"]][-12:]
     ativos = d["usuarios"]["ativos"]
     for r in d["mau_mes"]:
-        r["pct_ativos"] = r["mau_ativos"] / ativos * 100 if ativos else None
+        r["pct_ativos"] = (r["mau_na_base"] / r["base_mes"] * 100 if r.get("base_mes") else None) if "mau_na_base" in r else (r["mau_ativos"] / ativos * 100 if ativos else None)
         den = ativos + max(r["mau"] - r["mau_ativos"], 0)
         r["pct_todos"] = r["mau"] / den * 100 if den else None
     mpct = [r["pct_ativos"] for r in mm]
@@ -427,7 +433,7 @@ def montar(d, ex, rev_rows):
     dm = mpct[-1] - mpct[-2] if len(mpct) >= 2 else None
     st_mau = "ok" if (dm is not None and dm >= 0) else ("warn" if dm is not None and dm > -3 else "bad")
     F.append(("mau", farol(st_mau, "MAU · último mês fechado", f"{br(mpct[-1])}%",
-                           f"{ni(mm[-1]['mau_ativos'])} dos {ni(ativos)} usuários ativos assistiram em {ml(mm[-1]['mes'])}.",
+                           f"{ni(mm[-1].get('mau_na_base', mm[-1]['mau_ativos']))} dos {ni(mm[-1].get('base_mes', ativos))} usuários da base de {ml(mm[-1]['mes'])} assistiram no mês.",
                            seta(dm) + f" vs. {ml(mm[-2]['mes'])}" if dm is not None else "", spark(mpct))))
     st_ct = "bad" if tot_c and baixo / tot_c >= 0.5 else ("warn" if tot_c and baixo / tot_c >= 0.3 else "ok")
     F.append(("contas", farol(st_ct, "Contas com MAU < 25%", f"{baixo} <small>de {tot_c}</small>",
