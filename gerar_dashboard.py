@@ -235,7 +235,9 @@ def load_contas_contratos():
     if n_antes != len(contas):
         print(f"  ({n_antes - len(contas)} conta(s) fora da analise removida(s))")
     contratos["data_churn"] = pd.to_datetime(contratos["data_churn"], errors="coerce", utc=True)
-    contratos["ativo"] = contratos["data_churn"].isna()
+    # Churn com data FUTURA conta como ativo ate a data (decisao do Gui, 24/10/2026; mesma regra do banco).
+    _hoje_utc = pd.Timestamp(TODAY).tz_localize("UTC") if pd.Timestamp(TODAY).tzinfo is None else pd.Timestamp(TODAY).tz_convert("UTC")
+    contratos["ativo"] = contratos["data_churn"].isna() | (contratos["data_churn"] > _hoje_utc)
 
     active_ids = set(contratos.loc[contratos["ativo"], "conta_id"])
     contas["status_conta"] = contas["id"].apply(lambda x: "Ativa" if x in active_ids else "Inativa")
@@ -865,17 +867,24 @@ def mau_pace(cp, usuarios):
     meses_hist = meses_fechados[-12:] + [mes_pace]
     base_meses_baseline = meses_fechados[-PACE_MESES_BASELINE:]
 
+    # Mes corrente: base de hoje + quem SAIU neste mes mas assistiu aula (conta de churn do mes, inativado
+    # na Waid): engajamento conta para a meta (decisao do Gui, 24/10/2026). Quem saiu e nao assistiu fica de fora.
+    ini_mes = pd.Period(mes_pace, "M").start_time
+    assistiu_mes = set(c.loc[c["mes"] == mes_pace, "Email"])
+    saiu_assistiu = set(un.loc[(~un["usuario_ativo"]) & (un["data_saida"] >= ini_mes), "email"]) & assistiu_mes
+    base_pace = ativos_set | saiu_assistiu
+
     base_sets = {m: base_do_mes(un, m) for m in meses_hist}
-    base_sets[mes_pace] = ativos_set  # mes corrente: base de hoje (usuarios ativos)
+    base_sets[mes_pace] = base_pace  # mes corrente: ativos de hoje + saiu no mes e assistiu
 
     def serie(emails_grupo):
-        base = len(emails_grupo & ativos_set)
+        base = len(emails_grupo & base_pace)
         hist = []
         for m in meses_hist:
             e_m = emails_grupo & base_sets[m]
             n = int(((primeiro["mes"] == m) & primeiro["Email"].isin(e_m)).sum())
             hist.append({"mes": m, "mau": n, "base": len(e_m), "pct": round(n / len(e_m) * 100, 2) if e_m else None})
-        prim_a = primeiro[primeiro["Email"].isin(emails_grupo & ativos_set)]
+        prim_a = primeiro[primeiro["Email"].isin(emails_grupo & base_pace)]
         atual = prim_a.loc[prim_a["mes"] == mes_pace, "dia"]
         cont = np.bincount(atual.values, minlength=dias_mes + 1)[1:dias_mes + 1]
         acum = np.cumsum(cont)[:max(dia_ref, 0)]
