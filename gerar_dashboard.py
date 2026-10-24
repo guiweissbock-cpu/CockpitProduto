@@ -302,6 +302,8 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
 # historico de inativacao confiavel (a Waid so enviou a partir de 13/02/2026), entao esses meses
 # seguem usando a base de usuarios ativos hoje.
 HISTORICO_INATIV_DESDE = "2026-03"
+# Setembro/26 em diante usa a base de hoje: a limpeza em massa de inativos (23/09 e 01/10) deixaria a serie artificial.
+BASE_HOJE_DESDE = "2026-09"
 
 
 def um_por_email(usuarios):
@@ -309,7 +311,7 @@ def um_por_email(usuarios):
 
 
 def base_do_mes(un, mes):
-    if mes < HISTORICO_INATIV_DESDE:
+    if mes < HISTORICO_INATIV_DESDE or mes >= BASE_HOJE_DESDE:
         return set(un.loc[un["usuario_ativo"], "email"])
     p = pd.Period(mes, "M")
     ini, fim = p.start_time, p.end_time.normalize()
