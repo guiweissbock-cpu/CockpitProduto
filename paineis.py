@@ -897,11 +897,9 @@ def _qualidade(d, ex, rev_rows):
             revsg[r[4]] = revsg.get(r[4], 0) + 1
     revsg = sorted(revsg.items(), key=lambda x: -x[1])
     nd = dict(revsg).get("N/D", 0)
-    semuser = ex["contas_sem_usuario"]
     sem_ident = sum(1 for r in rev_rows if r[6] == "Não identificado")
     sg_rows = "".join(f'<tr><td>{esc(r["Conteúdo"])}</td><td class="n">{ni(r["ocorrencias"])}</td></tr>' for r in SG)
-    rv_rows = "".join(f'<tr><td>{esc(t)}</td><td class="n">{v}</td></tr>' for t, v in revsg[:80])
-    su_rows = "".join(f"<li>{esc(n)}</li>" for n in semuser) or "<li class=muted>Nenhuma.</li>"
+    av_rows = "".join(f'<tr><td>{esc(r["cat"])}</td><td class="n">{ni(r["titulos"])}</td><td class="n">{ni(r["conclusoes"])}</td></tr>' for r in d.get("consumo_avulso", []))
     return (
         '<div class="headline"><div class="big"><b>Para que serve:</b> tudo o que o painel não conseguiu encaixar. Cada item corrigido na origem (Biblioteca PAI, Supabase, Waid ou Zoom) melhora os números das outras abas na próxima atualização.</div></div>'
         '<div class="farois">'
@@ -910,15 +908,10 @@ def _qualidade(d, ex, rev_rows):
         + farol("info", "Consumo avulso (sem grupo por design)", ni(sum(r["conclusoes"] for r in d.get("consumo_avulso", []))),
                 " · ".join(f'{esc(r["cat"])}: {ni(r["conclusoes"])}' for r in d.get("consumo_avulso", [])) or "Nenhum.",
                 "", "", "Conta no MAU; não é erro. Só vira alerta se o título não se encaixar em nenhuma categoria.")
-        + farol("warn" if revsg else "ok", "Avaliações sem grupo", ni(sum(v for _, v in revsg)),
-                f"{ni(nd)} vêm do Zoom sem o tópico da reunião (N/D); as demais têm título que não bate com a Biblioteca PAI.", "", "",
-                "Preencher o tópico da reunião no Zoom e cadastrar o título na Biblioteca PAI")
         + farol("warn" if sem_ident else "ok", "Avaliações sem grupo de acesso", ni(sem_ident),
                 "O e-mail de quem avaliou não está na tabela usuarios — não entram no filtro por grupo de acesso.", "", "", "Conferir se são convidados, e-mails pessoais ou usuários faltando no Supabase")
-        + farol("warn" if semuser else "ok", "Contas ativas sem usuário", str(len(semuser)),
-                "Contrato vigente e nenhum usuário cadastrado: usuário em outra conta ou conta não implantada.", "", "", "Conferir o id_conta dos usuários dessas empresas")
         + '</div><div class="cols" style="margin-top:12px">'
         '<div class="box tbl"><h3>Aulas sem grupo (consumo)</h3><div class="filters" style="border:0;padding:0;margin-bottom:8px"><label for="qBusca">Buscar<input id="qBusca" type="search" placeholder="Título da aula"></label></div>'
         f'<div class="list-scroll"><table id="qTab"><tr><th>Título como veio da Waid</th><th class="n">Conclusões</th></tr>{sg_rows}</table></div></div>'
-        f'<div class="box tbl"><h3>Avaliações sem grupo</h3><div class="list-scroll"><table><tr><th>Título da aula avaliada</th><th class="n">Avaliações</th></tr>{rv_rows}</table></div>'
-        f'<h3 style="margin-top:14px">Contas ativas sem usuário</h3><ul class="list">{su_rows}</ul></div></div>')
+        f'<div class="box tbl"><h3>Consumo avulso por design</h3><table><tr><th>Categoria</th><th class="n">Títulos</th><th class="n">Conclusões</th></tr>{av_rows}</table>'
+        '<p class="note">Conta no MAU e não é erro: masterclass e webinars, trilhas de clientes (TotalPass), acessos de parceiros, podcast e testes.</p></div></div>')
