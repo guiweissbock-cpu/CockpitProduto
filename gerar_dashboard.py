@@ -205,6 +205,7 @@ SHEETS_MAP = {
     "PROGRAMA DE GESTÃO": "Gestão",
     "CERTIFICAÇÃO DE VENDEDORES B2B": "Programas Especiais",
     "ESPECIALIZAÇÃO DE VENDEDORES": "Programas Especiais",
+    "MÁQUINA DE VENDAS": "Class",
 }
 def clean_json(obj):
     """Troca NaN/Inf por None recursivamente para gerar JSON valido."""
@@ -390,6 +391,20 @@ MANUAL_OVERRIDES = {
     "Rituais de Gestão de Vendas B2B": "Gestão",
     "A ROTA DO VENDEDOR AO GERENTE DE VENDAS": "Gestão",
     "Construindo uma Carreira Internacional em Vendas B2B": "Pré-Vendas",
+    # 24/10/2026: titulos da Waid que mudaram de nome em relacao a Biblioteca PAI (ou vieram com
+    # erro de codificacao) e cuja sessao esta na biblioteca.
+    "Programa de Construção da Máquina de Vendas B2B: Construção de Playbooks de Vendas com IA": "Class",
+    "Programa de Construção da Máquina de Vendas B2B: Estratégias de Crescimento e Go-To-Market (GTM)": "Class",
+    "Criação de Claude Gems de para construção de templates de cadência": "Class",
+    "A Máquina das Máquinas de Vendas B2B do Brasil": "Pré-Vendas",
+    "COMO AVALIAR A TERCEIRIZAÇÃ0 DE PROSPECÇÃ0?": "Gestão",
+    "Como motivar uma equipe de vendas desengajada": "Gestão",
+    "Certificação para canais e parcerias": "Canais e Parcerias",
+    "Como organizar o dia a dia de uma operação volumosa": "Pré-Vendas",
+    "Programa de Indicação de Clientes": "Gestão",
+    "Processo, forecast e previsibilidade na pr??tica": "Executivos",
+    "Spin Selling como voc?? nunca viu: O poder das perguntas para fechar mais negócios": "Class",
+    "Como se preparar para um reunião de forecast?": "Executivos",
 }
 
 
@@ -435,6 +450,14 @@ def load_titulo_grupo_map():
     return mapping
 
 
+def _nk(s):
+    """Chave de comparacao de titulos: sem acentos, sem pontuacao, sem espacos invisiveis."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(s).replace("\xa0", " ").replace("\u200b", ""))
+    t = t.encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
 def _norm_ws(s):
     """Colapsa espacos duplos/multiplos em um so, e tira espacos nas pontas."""
     return re.sub(r"\s+", " ", s).strip()
@@ -448,6 +471,9 @@ def _map_case_insensitive(series, mapping):
     mapping_lower = {k.lower(): v for k, v in mapping.items()}
     mapping_norm = {_norm_ws(k).lower(): v for k, v in mapping.items()}
 
+    mapping_nk = {}
+    for k, v in mapping.items():
+        mapping_nk.setdefault(_nk(k), v)
     exato = series.map(mapping)
     faltando = exato.isna()
     if faltando.any():
@@ -457,6 +483,10 @@ def _map_case_insensitive(series, mapping):
     if faltando.any():
         via_norm = series[faltando].apply(_norm_ws).str.lower().map(mapping_norm)
         exato.loc[faltando] = via_norm
+    faltando = exato.isna()
+    if faltando.any():
+        # sem acentos, sem pontuacao, sem espacos invisiveis (nbsp, zero-width)
+        exato.loc[faltando] = series[faltando].apply(_nk).map(mapping_nk)
     return exato
 
 
@@ -1271,8 +1301,86 @@ def lead_time_churn(contratos, usuarios, cp):
 # ---------------------------------------------------------------
 # 13. AULAS SEM GRUPO IDENTIFICADO
 # ---------------------------------------------------------------
-def aulas_sem_grupo(cp):
+# ---------------------------------------------------------------
+# CONSUMO AVULSO POR DESIGN (decisao do Gui, 24/10/2026): conteudo que nao
+# pertence a um grupo de conteudo da Biblioteca PAI e conta so como consumo
+# (podcast, masterclass/webinar, trilhas de clientes como a TotalPass,
+# acessos/onboarding de parceiros e aulas de teste). Continua no MAU; so deixa
+# de aparecer como "aula sem grupo" na aba Qualidade de Dados.
+# ---------------------------------------------------------------
+AVULSO_REGRAS = [
+    ("Podcast Vamos de Vendas", re.compile(r"vamos de vendas|\bvdv\b", re.I)),
+    ("Teste", re.compile(r"^(aula )?teste\b|\[teste\]|^teste ", re.I)),
+    ("TotalPass e trilhas de clientes", re.compile(r"totalpass|\btp\b", re.I)),
+]
+AVULSO_TITULOS = {
+    "Clientes e parceiros (acessos e onboarding)": [
+        "Zoho CRM", "BESTSELLERS", "Meetz", "MeetRox", "Acesso Rapport", "SalesHunter", "Dynamis na Imprensa",
+        "Checkmob", "8DHubify", "Intexfy", "Exchange", "Elephan", "Partner Pro", "Wati", "TotalPass",
+    ],
+    "TotalPass e trilhas de clientes": [
+        "Introdução ao pré-vendas", "Jornada do Cliente", "Oratória para Vendedores B2B", "Abordagem",
+        "Estudo de Caso Pré Vendas", "Ferramentas Pré Vendas", "Boas Práticas Pré Vendas",
+        "Metodologia Vendas Diretas", "Metodologia Trade Marketing", "Ferramentas CS Indiretos",
+        "Mercado de Benefícios e Concorrentes", "Para quem vendemos", "Glossário", "Trilha Onboarding CSs",
+        "Comunidade Pré-Vendas", "Comunidade Gestão", "EXECUTIVOS DE VENDAS", "PIPELOVERS CLASS",
+    ],
+    "Masterclass e webinars": [
+        "Como Melhorar os Resultados Comerciais com uma Gestão Eficiente de Dados no CRM",
+        "9 Passos para Gerar 40% de Incremento em Vendas",
+        "Estratégias Avançadas de WhatsApp para Geração de Receita",
+        "CRM + WhatsApp: a Integração que Destrava seu Time de Vendas",
+        "O que Ninguém te Contou Sobre Inteligência Comercial",
+        "O que Todo Gestor Queria: Controle Real da Prospecção Comercial",
+        "Técnicas de Vendas B2B: o que líderes precisam garantir no time",
+        "De Canais de Comunicação a Canais de Receita",
+        "Agentes de IA: o Futuro da Gestão Comercial é Preditivo",
+        "Como Triplicar sua Geração de Leads com WhatsApp e ChatBot",
+        "Os Bastidores da Previsibilidade em Vendas: Como Transformar Rotina em Resultado",
+        "O Impacto de Social Media na Estratégia de Vendas B2B",
+        "Como criar seu primeiro agente de IA em 2 minutos",
+        "Como Transformar Vendas Externas em um Canal Previsível, Produtivo e Inteligente",
+        "IA para vendas - crie seu agente para escalar atendimento e geração de pipeline",
+        "Engenharia de Dados de Performance em CRM de Vendas",
+        "O Fim dos Silos: Como Integrar Equipes para Multiplicar Conversões em 2026",
+        "Social Selling na Prática: como vender pelo Instagram em 2026",
+        "Agentes de IA e WhatsApp: a nova fronteira para crescimento em vendas",
+        "Desmistificando tudo sobre contabilidade para vendedores",
+        "Como transformar parceiros em um canal previsível de crescimento",
+        "Negociação em Vendas Enterprise: como alinhar interesses e fechar negócios",
+        "Como incrementar resultados comerciais em 2027 usando IA",
+        "Como transformar métricas de SDR em previsibilidade de receita",
+    ],
+}
+# sessoes com convidado ("..., com Fulano") sem cadastro na biblioteca = masterclass
+AVULSO_CONVIDADO = re.compile(r",\s+com\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\w\.\-]+", re.U)
+
+
+def categoria_avulsa(titulo):
+    """Categoria de consumo avulso (sem grupo por design) ou None."""
+    t = str(titulo).strip()
+    for nome, rx in AVULSO_REGRAS:
+        if rx.search(t):
+            return nome
+    k = _nk(t)
+    for nome, lista in AVULSO_TITULOS.items():
+        if k in {_nk(x) for x in lista}:
+            return nome
+    if AVULSO_CONVIDADO.search(t):
+        return "Masterclass e webinars"
+    return None
+
+
+def consumo_avulso(cp):
+    """Conclusoes sem grupo que sao avulsas por design, por categoria."""
     sem = cp[cp["grupo"] == "Sem Grupo Identificado"]
+    cat = sem["Conteúdo"].apply(categoria_avulsa)
+    av = sem[cat.notna()].assign(cat=cat[cat.notna()])
+    return av.groupby("cat").agg(conclusoes=("Conteúdo", "size"), titulos=("Conteúdo", "nunique")).reset_index().sort_values("conclusoes", ascending=False)
+
+
+def aulas_sem_grupo(cp):
+    sem = cp[(cp["grupo"] == "Sem Grupo Identificado") & cp["Conteúdo"].apply(categoria_avulsa).isna()]
     contagem = sem.groupby("Conteúdo").size().reset_index(name="ocorrencias").sort_values(
         "ocorrencias", ascending=False
     )
@@ -1295,7 +1403,7 @@ def main():
     aulas_ao_vivo = load_aulas_ao_vivo()
     cp = load_consumo(mapping, aulas_ao_vivo, usuarios)
 
-    sem_grupo_pct = (cp["grupo"] == "Sem Grupo Identificado").mean() * 100
+    sem_grupo_pct = ((cp["grupo"] == "Sem Grupo Identificado") & cp["Conteúdo"].apply(categoria_avulsa).isna()).mean() * 100
 
     consumo_semana, consumo_mes, users_semana, users_mes, mau_mes, mau_mes_ativos, volume_medio = agregacoes_consumo(cp)
     mau_grupo_mes = mau_por_grupo(cp)
@@ -1386,6 +1494,7 @@ def main():
         "cohort_retencao": cohort,
         "lead_time_churn": lead_time,
         "sem_grupo_tabela": sem_grupo_tabela.to_dict("records"),
+        "consumo_avulso": consumo_avulso(cp).to_dict("records"),
         "meta": {
             "gerado_em": TODAY.strftime("%Y-%m-%d"),
             "aviso_grupo": (

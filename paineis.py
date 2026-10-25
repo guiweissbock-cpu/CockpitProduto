@@ -907,6 +907,9 @@ def _qualidade(d, ex, rev_rows):
         '<div class="farois">'
         + farol("warn" if SG else "ok", "Aulas sem grupo de conteúdo", str(len(SG)),
                 f'{ni(sum(r["ocorrencias"] for r in SG))} conclusões caem em “Sem Grupo Identificado”.', "", "", "Deixar o título na Biblioteca PAI idêntico ao da Waid")
+        + farol("info", "Consumo avulso (sem grupo por design)", ni(sum(r["conclusoes"] for r in d.get("consumo_avulso", []))),
+                " · ".join(f'{esc(r["cat"])}: {ni(r["conclusoes"])}' for r in d.get("consumo_avulso", [])) or "Nenhum.",
+                "", "", "Conta no MAU; não é erro. Só vira alerta se o título não se encaixar em nenhuma categoria.")
         + farol("warn" if revsg else "ok", "Avaliações sem grupo", ni(sum(v for _, v in revsg)),
                 f"{ni(nd)} vêm do Zoom sem o tópico da reunião (N/D); as demais têm título que não bate com a Biblioteca PAI.", "", "",
                 "Preencher o tópico da reunião no Zoom e cadastrar o título na Biblioteca PAI")
