@@ -403,7 +403,9 @@ MANUAL_OVERRIDES = {
     "Como organizar o dia a dia de uma operação volumosa": "Pré-Vendas",
     "Programa de Indicação de Clientes": "Gestão",
     "Processo, forecast e previsibilidade na pr??tica": "Executivos",
+    "Processo, forecast e previsibilidade na pr\ufffd\ufffdtica": "Executivos",
     "Spin Selling como voc?? nunca viu: O poder das perguntas para fechar mais negócios": "Class",
+    "Spin Selling como voc\ufffd\ufffd nunca viu: O poder das perguntas para fechar mais negócios": "Class",
     "Como se preparar para um reunião de forecast?": "Executivos",
 }
 
