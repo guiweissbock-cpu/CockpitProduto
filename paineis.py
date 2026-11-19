@@ -188,12 +188,15 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contrato
     uu["conta"] = uu["id_conta"].astype(str).str.replace(r"\.0$", "", regex=True)
     uu = uu[uu["conta"].isin(ativas)]
     csm = uu.drop_duplicates("conta").set_index("conta")["csm"].to_dict()
-    por_mes = {m: set(c.loc[c["mes"] == m, "Email"]) for m in meses_f[-4:]}
+    # evolução de "contas com MAU < 25%" (Visão geral): só meses com base mensal confiável (histórico de inativação desde 2026-03)
+    meses_ev = [m for m in meses_f[-7:] if m >= "2026-03"]
+    por_mes = {m: set(c.loc[c["mes"] == m, "Email"]) for m in sorted(set(meses_ev) | set(meses_f[-4:]))}
     ultimo_cons = c.groupby("Email")["data"].max()
     ja_cons = set(c["Email"])
     rows = []
     _un = usuarios.sort_values("usuario_ativo", ascending=False).drop_duplicates(subset="email")
-    base_mes_g = {m: base_fn(_un, m) for m in meses_f[-4:]} if base_fn else {}
+    base_mes_g = {m: base_fn(_un, m) for m in sorted(set(meses_ev) | set(meses_f[-4:]))} if base_fn else {}
+    ev = {m: [] for m in meses_ev}
     for conta, g in uu.groupby("conta"):
         at_em = set(g.loc[g["usuario_ativo"], "email"])
         in_em = set(g.loc[~g["usuario_ativo"], "email"])
@@ -206,6 +209,11 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contrato
         bm = (lambda m: todos_em & base_mes_g[m]) if base_fn else (lambda m: at_em)
         b_ult = bm(ult)
         mau_at = len(b_ult & viu) / len(b_ult) * 100 if b_ult else None
+        if n_at:  # mesma base do farol (contas ativas hoje com usuário ativo), com a base de cada mês
+            for m in meses_ev:
+                bmm = bm(m)
+                if bmm and m in por_mes:
+                    ev[m].append(len(bmm & por_mes[m]) / len(bmm) * 100)
         mau_todos = (a_viu + i_viu) / (n_at + i_viu) * 100 if (n_at + i_viu) else None
         hist = [len(bm(m) & por_mes[m]) / len(bm(m)) * 100 if bm(m) and m in por_mes else None for m in meses_f[-4:-1]]
         hist = [h for h in hist if h is not None]
@@ -226,6 +234,7 @@ def calcular_extras(cp, usuarios, contas, hoje, mes_atual, ult_fechado, contrato
     sem_user = [nome.get(cid, cid) for cid in ativas if cid not in set(uu["conta"])]
     ex["churn_usuarios"] = churn_usuarios(c, hoje, mes_atual, contratos=contratos, usuarios=usuarios)
     ex["contas"] = rows
+    ex["mau25_serie"] = [dict(mes=m, contas=len(v), baixo=sum(1 for x in v if x < 25), pct=round(sum(1 for x in v if x < 25) / len(v) * 100, 1)) for m, v in ev.items() if v]
     ex["contas_sem_usuario"] = sorted(sem_user)
     ex["ult"], ex["ant"] = ult, ant
     return ex
@@ -526,6 +535,7 @@ def montar(d, ex, rev_rows):
     ph["BEM"] = "".join(bem) or item("info", "Nada se destacou positivamente neste mês.")
     ph["FAROIS"] = farois
     ph["CHURN"] = _churn_html(CH, ch_avg)
+    ph["EVOL25"] = _evol25(ex.get("mau25_serie", []))
     ct, us = d["contas"], d["usuarios"]
     card = lambda lab, val, sub, cls="": f'<div class="card"><div class="kpi-label">{lab}</div><div class="kpi-value {cls}">{val}</div><div class="kpi-sub">{sub}</div></div>'
     ph["BASE"] = (card("Contas ativas hoje", ni(ct["ativas"]), f"{br(ct['ativas'] / ct['total'] * 100)}% de {ni(ct['total'])} contas", "green")
@@ -611,6 +621,23 @@ def montar(d, ex, rev_rows):
     for k in ("geral", "pace", "mau", "notas", "consumo", "contas", "dorm"):
         ph["SD_" + k.upper()] = status_aba.get(k, "info")
     return ph
+
+
+def _evol25(S):
+    """Evolução do % de contas ativas com MAU abaixo de 25% (Visão geral, pedido do Gui 19/11)."""
+    if len(S) < 2:
+        return ""
+    meses = [r["mes"] for r in S]
+    graf = linechart(meses, [("% das contas com MAU < 25%", "var(--bad)", [r["pct"] for r in S])], lo=0, h=220)
+    u, a = S[-1], S[-2]
+    d = u["pct"] - a["pct"]
+    txt = ("melhorou" if d < 0 else "piorou" if d > 0 else "ficou igual")
+    linhas = "".join(f'<tr><td>{ml(r["mes"])}</td><td class="n">{ni(r["contas"])}</td><td class="n">{ni(r["baixo"])}</td><td class="n"><b>{br(r["pct"])}%</b></td>'
+                     f'<td class="n">{"—" if i == 0 else seta(r["pct"] - S[i - 1]["pct"]).replace('class="up"', 'class="tmp"').replace('class="down"', 'class="up"').replace('class="tmp"', 'class="down"')}</td></tr>' for i, r in enumerate(S))
+    return (f'<div class="sec"><h2>Contas com MAU abaixo de 25% — evolução</h2><span class="n">contas ativas hoje com usuário ativo, com a base de cada mês · quanto menor, melhor · '
+            f'{ml(u["mes"])} {txt} {br(abs(d))} p.p. vs. {ml(a["mes"])}</span></div>'
+            f'<div class="cols"><div class="box">{graf}</div><div class="box tbl"><table><tr><th>Mês</th><th class="n">Contas</th><th class="n">MAU &lt; 25%</th><th class="n">% das contas</th><th class="n">vs. mês anterior</th></tr>{linhas}</table>'
+            f'<p class="note">Só meses fechados. Contas que deram churn no caminho não entram, por isso os meses antigos têm menos contas.</p></div></div>')
 
 
 def _churn_html(CH, ch_avg):
