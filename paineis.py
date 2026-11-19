@@ -623,6 +623,11 @@ def montar(d, ex, rev_rows):
     return ph
 
 
+def _seta_inv(v):
+    """seta() com as cores invertidas: aqui cair é bom."""
+    return seta(v).replace('class="up"', 'class="tmp"').replace('class="down"', 'class="up"').replace('class="tmp"', 'class="down"')
+
+
 def _evol25(S):
     """Evolução do % de contas ativas com MAU abaixo de 25% (Visão geral, pedido do Gui 19/11)."""
     if len(S) < 2:
@@ -633,7 +638,7 @@ def _evol25(S):
     d = u["pct"] - a["pct"]
     txt = ("melhorou" if d < 0 else "piorou" if d > 0 else "ficou igual")
     linhas = "".join(f'<tr><td>{ml(r["mes"])}</td><td class="n">{ni(r["contas"])}</td><td class="n">{ni(r["baixo"])}</td><td class="n"><b>{br(r["pct"])}%</b></td>'
-                     f'<td class="n">{"—" if i == 0 else seta(r["pct"] - S[i - 1]["pct"]).replace('class="up"', 'class="tmp"').replace('class="down"', 'class="up"').replace('class="tmp"', 'class="down"')}</td></tr>' for i, r in enumerate(S))
+                     f'<td class="n">{"—" if i == 0 else _seta_inv(r["pct"] - S[i - 1]["pct"])}</td></tr>' for i, r in enumerate(S))
     return (f'<div class="sec"><h2>Contas com MAU abaixo de 25% — evolução</h2><span class="n">contas ativas hoje com usuário ativo, com a base de cada mês · quanto menor, melhor · '
             f'{ml(u["mes"])} {txt} {br(abs(d))} p.p. vs. {ml(a["mes"])}</span></div>'
             f'<div class="cols"><div class="box">{graf}</div><div class="box tbl"><table><tr><th>Mês</th><th class="n">Contas</th><th class="n">MAU &lt; 25%</th><th class="n">% das contas</th><th class="n">vs. mês anterior</th></tr>{linhas}</table>'
