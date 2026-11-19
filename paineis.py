@@ -633,7 +633,7 @@ def _evol25(S):
     if len(S) < 2:
         return ""
     meses = [r["mes"] for r in S]
-    graf = linechart(meses, [("% das contas com MAU < 25%", "var(--bad)", [r["pct"] for r in S])], lo=0, h=220)
+    graf = linechart(meses, [("Contas < 25%", "var(--bad)", [r["pct"] for r in S])], lo=0, w=560, h=330)
     u, a = S[-1], S[-2]
     d = u["pct"] - a["pct"]
     txt = ("melhorou" if d < 0 else "piorou" if d > 0 else "ficou igual")
