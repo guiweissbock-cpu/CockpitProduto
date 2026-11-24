@@ -753,6 +753,8 @@ document.querySelectorAll('.download-btn').forEach(btn=>btn.addEventListener('cl
   const rows=[...document.getElementById(btn.dataset.table).querySelectorAll('tr')].map(tr=>[...tr.children].map(td=>'"'+td.textContent.replace(/"/g,'""')+'"').join(';'));
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['\uFEFF'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'})); a.download=btn.dataset.filename; document.body.appendChild(a); a.click(); a.remove();
 }));
+
+try{ if(location.hash==='#pace'){ const t=document.querySelector('.tab[data-p="pace"]'); if(t) t.click(); } }catch(e){}
 </script>
 </body>
 </html>
