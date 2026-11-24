@@ -228,6 +228,8 @@ td.parcial{color:var(--muted);font-style:italic}
       <div class="filter-bar">
         <label for="filtroGrupoPace" class="filter-label">Grupo de acesso:</label>
         <select id="filtroGrupoPace" class="filter-select"></select>
+        <label for="filtroVisPace" class="filter-label">Visualizadores:</label>
+        <select id="filtroVisPace" class="filter-select"><option value="com">Com visualizadores</option><option value="sem">Sem visualizadores (contam se assistirem)</option></select>
       </div>
     </div>
     <div class="callout" id="pace-callout" style="margin-top:0;"></div>
@@ -455,7 +457,10 @@ document.getElementById('qBusca').addEventListener('input',e=>{const q=e.target.
 try {
 // ================= PACE DE MAU =================
 (function renderPaceTab(){
-  const P = DATA.mau_pace;
+  const SEMVIS = new URLSearchParams(location.search).get('vis') === 'sem' && DATA.mau_pace_semvis;
+  const P = SEMVIS ? DATA.mau_pace_semvis : DATA.mau_pace;
+  const fv = document.getElementById('filtroVisPace');
+  if (fv) { fv.value = SEMVIS ? 'sem' : 'com'; fv.onchange = () => { const u = new URL(location.href); if (fv.value === 'sem') u.searchParams.set('vis','sem'); else u.searchParams.delete('vis'); u.hash = 'pace'; location.href = u.toString(); }; }
   const MES_ABREV = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   const mesLabel = am => { const [y,m]=am.split('-'); return `${MES_ABREV[+m-1]}/${y.slice(2)}`; };
   const addMes = (am,n) => { const [y,m]=am.split('-').map(Number); const d=new Date(y, m-1+n, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; };

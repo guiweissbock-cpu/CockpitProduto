@@ -867,7 +867,7 @@ def _curva_pace(dias_por_mes_ativos, meses, dias_mes_atual):
     return [round(float(x), 4) for x in curva]
 
 
-def mau_pace(cp, usuarios):
+def mau_pace(cp, usuarios, sem_vis=False):
     metas_globais, metas_manuais = _ler_metas()
 
     # todos os usuarios (inclusive quem ja saiu): cada mes usa a base de quem estava la naquele mes
@@ -908,6 +908,14 @@ def mau_pace(cp, usuarios):
 
     base_sets = {m: base_do_mes(un, m) for m in meses_hist}
     base_sets[mes_pace] = base_pace  # mes corrente: ativos de hoje + saiu no mes e assistiu
+    # 24/11/2026 (Gui): visao "sem visualizadores" -- quem tem a tag Visualizador na Waid sai da base
+    # do mes, a menos que tenha assistido aula naquele mes (ai conta normalmente).
+    if sem_vis and "tags" in un.columns:
+        vis = set(un.loc[un["tags"].apply(lambda t: isinstance(t, (list, tuple)) and any("visualiz" in str(x).lower() for x in t)), "email"])
+        if vis:
+            for m in list(base_sets):
+                base_sets[m] = base_sets[m] - (vis - set(primeiro.loc[primeiro["mes"] == m, "Email"]))
+            base_pace = base_sets[mes_pace]
 
     def serie(emails_grupo):
         base = len(emails_grupo & base_pace)
@@ -1413,6 +1421,10 @@ def main():
     # gerado normalmente e a aba PACE mostra "sem dados"; o erro fica no log.
     try:
         pace = mau_pace(cp, usuarios)
+        try:
+            pace_sv = mau_pace(cp, usuarios, sem_vis=True)
+        except Exception:
+            pace_sv = None
     except Exception:
         import traceback
         print("  ERRO no PACE de MAU (painel segue sem essa aba):")
@@ -1481,6 +1493,7 @@ def main():
         "mau_grupo_mes": mau_grupo_mes.to_dict("records"),
         "mau_resumo": mau_resumo,
         "mau_pace": pace,
+        "mau_pace_semvis": pace_sv if pace is not None else None,
         "volume_medio": volume_medio,
         "nota_grupo": nota_grupo.to_dict("records"),
         "nota_grupo_vivo": nota_grupo_vivo.to_dict("records"),
@@ -1531,7 +1544,7 @@ def main():
 
     template = TEMPLATE.read_text(encoding="utf-8")
     # No HTML vai so o que o JavaScript usa (PACE); o resto ja chega pronto em HTML.
-    dados_js = clean_json({"mau_pace": master.get("mau_pace"), "meta": master["meta"]})
+    dados_js = clean_json({"mau_pace": master.get("mau_pace"), "mau_pace_semvis": master.get("mau_pace_semvis"), "meta": master["meta"]})
     html = template.replace("__DATA_PLACEHOLDER__", json.dumps(dados_js, ensure_ascii=False))
     pedacos["DATA"] = TODAY.strftime("%d/%m/%Y")
     for chave, valor in pedacos.items():
