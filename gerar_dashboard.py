@@ -169,6 +169,25 @@ def _carregar_contas_fora():
     print(f"  contas fora da analise: {sorted(CONTAS_FORA_ANALISE)}")
 
 
+def _carregar_exclusoes_mau():
+    """E-mails que nao contam como ativos (vw_mau_exclusoes, alimentada todo dia pela auditoria
+    da base no Supabase): pessoas de contas com churn que seguem ativas na Waid, e-mails invalidos
+    e cadastros duplicados errados. Devolve e-mail -> data a partir da qual sai da base
+    (vazia = sempre). Sem Supabase, nao exclui ninguem."""
+    if not USE_SUPABASE:
+        return pd.Series(dtype=object)
+    try:
+        t = _supabase_fetch("vw_mau_exclusoes", "email,motivo,desde")
+    except Exception as e:
+        print(f"  AVISO: nao li vw_mau_exclusoes ({e}); base do MAU sem exclusoes")
+        return pd.Series(dtype=object)
+    if not len(t):
+        return pd.Series(dtype=object)
+    t["email"] = t["email"].astype(str).str.strip().str.lower()
+    print(f"  exclusoes do MAU (auditoria): {len(t)} | " + ", ".join(f"{k}: {v}" for k, v in t["motivo"].value_counts().items()))
+    return t.drop_duplicates("email").set_index("email")["desde"]
+
+
 def _fora(serie_ids):
     """True para as linhas cujo id de conta esta na lista de exclusao."""
     return pd.to_numeric(serie_ids, errors="coerce").isin(CONTAS_FORA_ANALISE)
@@ -289,6 +308,15 @@ def load_usuarios(conta_status_map, conta_nome_map, conta_csm_map):
     # o que contava inativos do LMS como ativos e ignorava B2C / contas sem contrato.
     # Mesmo criterio da view vw_usuarios_contas_ativas no Supabase.
     usuarios["usuario_ativo"] = usuarios["status"].astype(str).str.strip().str.lower().eq("true")
+    # Achados da auditoria da base: nao contam como ativos. No churn, a pessoa sai na data do churn
+    # (o historico antes dela fica igual); e-mail invalido e duplicata errada saem de todos os meses.
+    exc = _carregar_exclusoes_mau()
+    if len(exc):
+        m = usuarios["email"].isin(exc.index) & usuarios["usuario_ativo"]
+        desde = pd.to_datetime(usuarios.loc[m, "email"].map(exc), errors="coerce")
+        usuarios.loc[m, "usuario_ativo"] = False
+        usuarios.loc[m, "data_saida"] = desde.fillna(pd.Timestamp("1900-01-01"))
+        print(f"  {int(m.sum())} usuarios ativos na Waid fora da base do MAU (auditoria)")
 
     print(f"  usuarios ativos (LMS/status): {int(usuarios['usuario_ativo'].sum())} | "
           f"em conta com contrato vigente: {int((usuarios['status_conta'] == 'Ativa').sum())}")
